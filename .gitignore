@@ -1,0 +1,17 @@
+# Godot 4
+.godot/
+*.translation
+export_presets.cfg
+.import/
+# Builds
+build/
+export/
+*.pck
+*.exe
+# Steam
+steam_appid.txt
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
