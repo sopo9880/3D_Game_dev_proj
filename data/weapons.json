@@ -1,0 +1,25 @@
+[
+  {"id": "pistol", "name": "권총", "slot": 3,
+   "damage": 15, "pellets": 1, "rpm": 300, "auto": false, "mag": 12, "reload_time": 1.2, "reload_per_shell": false,
+   "infinite_ammo": true, "head_mult": 1.5,
+   "falloff_start": 15, "falloff_end": 35, "falloff_min": 0.6,
+   "spread_hip": 0.6, "spread_ads": 0.1, "spread_move": 0.8, "spread_air": 2.5, "bloom_per_shot": 0.5, "bloom_max": 2.5, "bloom_recover": 6.0,
+   "recoil_v": 1.1, "recoil_h": [0.15, -0.2, 0.1, -0.1], "recoil_h_rand": 0.15, "recoil_snap": 28, "recoil_recover": 9, "recoil_reset_time": 0.35, "ads_recoil_mult": 0.7,
+   "ads_fov": 60, "ads_time": 0.12, "kick_back": 0.05, "kick_up": 5.0, "shake": 0.25},
+
+  {"id": "rifle", "name": "돌격소총", "slot": 1,
+   "damage": 12, "pellets": 1, "rpm": 600, "auto": true, "mag": 30, "reload_time": 2.0, "reload_per_shell": false,
+   "infinite_ammo": false, "head_mult": 1.5,
+   "falloff_start": 20, "falloff_end": 50, "falloff_min": 0.6,
+   "spread_hip": 1.0, "spread_ads": 0.15, "spread_move": 1.2, "spread_air": 3.5, "bloom_per_shot": 0.22, "bloom_max": 2.2, "bloom_recover": 5.0,
+   "recoil_v": 0.55, "recoil_h": [0.0, 0.08, 0.15, 0.2, 0.1, -0.1, -0.22, -0.28, -0.15, 0.05, 0.2, 0.25], "recoil_h_rand": 0.12, "recoil_snap": 30, "recoil_recover": 7, "recoil_reset_time": 0.3, "ads_recoil_mult": 0.75,
+   "ads_fov": 55, "ads_time": 0.16, "kick_back": 0.035, "kick_up": 2.2, "shake": 0.18},
+
+  {"id": "shotgun", "name": "샷건", "slot": 2,
+   "damage": 8, "pellets": 10, "rpm": 70, "auto": false, "mag": 6, "reload_time": 0.5, "reload_per_shell": true,
+   "infinite_ammo": false, "head_mult": 1.25,
+   "falloff_start": 10, "falloff_end": 22, "falloff_min": 0.2,
+   "spread_hip": 3.0, "spread_ads": 2.4, "spread_move": 0.5, "spread_air": 1.5, "bloom_per_shot": 0.0, "bloom_max": 0.0, "bloom_recover": 5.0,
+   "recoil_v": 4.5, "recoil_h": [0.4, -0.5], "recoil_h_rand": 0.6, "recoil_snap": 22, "recoil_recover": 6, "recoil_reset_time": 0.6, "ads_recoil_mult": 0.85,
+   "ads_fov": 62, "ads_time": 0.18, "kick_back": 0.12, "kick_up": 11.0, "shake": 0.7}
+]

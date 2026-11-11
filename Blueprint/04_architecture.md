@@ -24,13 +24,15 @@
 
 | 항목 | 선택 | 비고 |
 | --- | --- | --- |
-| 언어 | GDScript (정적 타입 필수) | 시뮬레이션 코어가 예산을 넘으면 그 부분만 C#/GDExtension으로 옮긴다 |
+| 엔진 | Godot 4.7.2 (표준판, .NET판 아님) | |
+| 언어 | GDScript (정적 타입 필수) | `sim/`의 틱 코어만 M5 전에 GDExtension(C++)으로 옮긴다 ([D-025](07_decisions.md)) |
 | 렌더러 | Forward+ | |
 | 물리 | Jolt (Godot 내장) | 프로젝트 생성 시 엔진 버전의 지원 여부 확인 |
 | 멀티 | Godot 고수준 멀티플레이 API(`MultiplayerAPI`, RPC) | |
 | 전송 | 개발: `ENetMultiplayerPeer` / 출시: GodotSteam의 Steam용 MultiplayerPeer | 전송 교체가 게임 코드에 보이지 않게 한다 |
 | Steam | GodotSteam | 로비, 초대, 업적. 개발 중 테스트 앱 ID 480 사용 |
-| 테스트 | GUT 또는 gdUnit4 | M0에서 하나를 고른다 |
+| 테스트 | 자체 최소 실행기 (`tests/run_tests.gd`) | 외부 의존 없음. 부족해지면 GUT으로 옮긴다 |
+| 콘텐츠 데이터 | JSON (`data/*.json`) | [D-026](07_decisions.md) |
 | 지형 | 슬라이스는 직접 만든 메시. 이후 Terrain3D 검토 | |
 
 외부 애드온의 버전과 호환성은 도입 시점에 공식 문서로 다시 확인한다. 이 문서의 이름은 후보를 가리킬 뿐 버전을 보증하지 않는다.
@@ -40,36 +42,28 @@
 ```
 res://
 ├─ project.godot
-├─ addons/                 # godotsteam, 테스트 프레임워크
+├─ export_presets.cfg
 ├─ core/                   # 오토로드
-│   ├─ registry.gd         # 콘텐츠 정의 로딩·검증
-│   ├─ session.gd          # 호스트/참가/종료, 플레이어 목록, 역할
-│   ├─ net.gd              # 전송 생성(ENet/Steam), 연결 이벤트
-│   ├─ world.gd            # WorldState 소유, 명령 진입점, 이벤트 버스
-│   └─ save.gd             # 저장/불러오기/마이그레이션
-├─ data/                   # .tres: items/ recipes/ structures/ weapons/ enemies/ crops/ zones/
-├─ sim/                    # ★ 순수 로직. Node, 씬 트리, 싱글턴 접근 금지
-│   ├─ factory/            # belt_line.gd, crafter.gd, junction.gd, storage.gd, miner.gd
-│   ├─ power/              # power_grid.gd
-│   ├─ farming/            # plot.gd
-│   ├─ restoration/        # zone.gd, beacon.gd
-│   ├─ grid/               # 칸 점유, 청크, 포트 연결 그래프
-│   └─ sim_world.gd        # tick() 한 번에 전체를 한 걸음 진행
+│   └─ registry.gd         # 콘텐츠 로딩·검증          (session, net, world, save는 예정)
+├─ data/                   # items.json, recipes.json, structures.json, weapons.json
+├─ sim/                    # ★ 순수 로직. Node, 씬 트리, 오토로드 접근 금지
+│   ├─ content/            # ContentDB, ItemDef, RecipeDef, StructureDef
+│   ├─ sim_world.gd        # 설치·철거, tick(), 토폴로지, 직렬화
+│   ├─ sim_structure.gd    # 구조물 하나의 상태
+│   └─ sim_power_grid.gd
 ├─ game/                   # 씬과 Node 스크립트
-│   ├─ player/             # 이동, 카메라, 상호작용, 인벤토리 UI 연결
-│   ├─ weapons/
-│   ├─ enemies/            # AI 상태 기계, 스포너
-│   ├─ build/              # 건축 모드, 미리보기, 구조물 View
-│   ├─ factory_view/       # 벨트 MultiMesh, 기계 애니메이션·상태 아이콘
-│   ├─ world/              # 맵 씬, 구역 볼륨, 복원 연출
-│   └─ ui/
-├─ net/                    # 복제: commands.gd, events.gd, snapshot.gd
-├─ save/migrations/
-└─ tests/
-    ├─ sim/                # 헤드리스 단위 테스트
-    ├─ save/               # 마이그레이션, 왕복(저장→불러오기→비교)
-    └─ fixtures/           # 버전별 샘플 세이브
+│   ├─ player/             # 컨트롤러, 1인칭 총 모형
+│   ├─ weapons/            # WeaponDef, Gun(연사·탄약·반동 규칙)
+│   ├─ range/              # 사격 감각 테스트용 사격장
+│   ├─ ui/                 # HUD, 수치 조정 패널
+│   ├─ audio/, fx/         # 임시 합성 효과음, 임시 효과
+│   └─ (enemies, build, factory_view, world 는 예정)
+├─ net/                    # 예정: commands, events, snapshot
+├─ tests/                  # run_tests.gd, test_case.gd, sim/test_*.gd
+└─ tools/                  # bench_factory.gd, 테스트 빌드 안내문
 ```
+
+지금은 `SimWorld` 한 파일에 공장·전력·격자가 함께 있다. 농사와 복원이 들어오는 M2~M3에서 `sim/factory`, `sim/farming` 등으로 나눈다.
 
 ### 계층 규칙
 
@@ -140,7 +134,8 @@ res://
 
 `Net.host(mode)`, `Net.join(target)`만 전송 종류를 안다. 그 뒤로는 `multiplayer.multiplayer_peer`에 넣을 뿐이므로 게임 코드는 ENet인지 Steam인지 모른다.
 
-- 개발: ENet + 로컬호스트. 한 PC에서 창 2~4개를 띄워 테스트한다(에디터의 다중 인스턴스 실행 기능).
+- 개발: ENet + 로컬호스트. 한 PC에서 창 2~4개를 띄워 테스트한다(에디터의 다중 인스턴스 실행 기능). 8인 부하는 입력을 자동으로 넣는 헤드리스 클라이언트로 채운다.
+- 최대 접속 수는 8(호스트 포함)로 전송 계층에서 제한한다.
 - Steam: 로비 생성 → 친구 초대 → 로비 소유자의 Steam ID로 접속. Steam 중계를 쓰므로 포트 개방이 필요 없다.
 
 ## 시뮬레이션
@@ -185,7 +180,7 @@ res://
 
 ## 성능 예산
 
-기준 사양: **GTX 1660급 GPU, 6코어 CPU, 1080p**. 4인 협동, 호스트 기준.
+기준 사양: **GTX 1660급 GPU, 6코어 CPU, 1080p**. 8인 접속, 호스트 기준.
 
 | 항목 | 예산 |
 | --- | --- |
@@ -193,13 +188,15 @@ res://
 | 공장 시뮬레이션 | 틱당 평균 2ms 이하, 최악 5ms |
 | 슬라이스 목표 규모 | 설비 500개, 벨트 2,000칸 |
 | 출시 목표 규모 | 설비 5,000개, 벨트 20,000칸 |
-| 동시에 활동하는 적 | 30 |
+| 동시에 활동하는 적 | 40 (8인이 두 구역에 나뉘어 싸우는 경우 기준) |
 | 클라이언트 업로드 | 20KB/s 이하 |
-| 호스트 업로드 | 클라이언트당 50KB/s 이하 |
+| 호스트 업로드 | 클라이언트당 50KB/s 이하 (7명 접속 시 합계 350KB/s ≈ 2.8Mbps) |
 | 자동 저장 | 프레임 끊김 5ms 이하(파일 쓰기는 스레드) |
 | 중도 참가 | 출시 목표 규모에서 15초 이내 |
 
-**M0에서 출시 목표 규모를 가짜 데이터로 채워 틱 시간을 잰다.** GDScript로 예산을 못 맞추면 그 시점에 코어 언어를 결정한다. 나중으로 미루지 않는다.
+**M0에서 측정했다.** GDScript는 슬라이스 규모에서 평균 0.61ms(통과), 출시 목표 규모에서 10.8ms(5배 초과)다. 단계별로는 제작 준비 2.2 / 전력 0.7 / 제작 진행 2.5 / 벨트 3.6 / 출력 2.2ms로 한 곳에 몰려 있지 않다. 한두 군데를 고쳐서 5배를 줄일 수 있는 모양이 아니어서 틱 코어를 네이티브로 옮기기로 했다([D-025](07_decisions.md)). 측정은 `godot --headless -s tools/bench_factory.gd`로 다시 할 수 있다.
+
+8인이 되면서 늘어나는 비용은 주로 플레이어 동기화(7명 × 30Hz)와 공장 스냅샷을 받는 사람 수다. 공장 시뮬레이션 자체는 인원과 무관하다.
 
 ## 테스트와 자동화
 
@@ -212,7 +209,7 @@ res://
 | 벤치마크 | 대규모 가짜 공장의 틱 시간 | 마일스톤마다, 회귀 시 실패 처리 |
 | 멀티 수동 | 2~4창 체크리스트(설치, 참가, 이탈, 호스트 종료) | 마일스톤마다 |
 
-CI는 GitHub Actions에서 헤드리스 Godot으로 위의 "커밋마다" 항목을 돌린다. M0에서 구성한다.
+CI(`.github/workflows/build.yml`)는 푸시마다 단위 테스트, 슬라이스 규모 벤치마크, Windows 내보내기, 내보낸 팩의 자동 점검을 돌리고 테스트 빌드를 올린다. 자세한 것은 [08](08_dev_process.md).
 
 ## 코드 규칙
 

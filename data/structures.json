@@ -1,0 +1,40 @@
+[
+  {"id": "floor",  "tab": "building", "footprint": [4, 1, 4], "cost": [["iron_ingot", 2]]},
+  {"id": "wall",   "tab": "building", "footprint": [4, 4, 1], "cost": [["iron_ingot", 2]]},
+  {"id": "stairs", "tab": "building", "footprint": [4, 4, 4], "cost": [["iron_ingot", 4]]},
+  {"id": "roof",   "tab": "building", "footprint": [4, 1, 4], "cost": [["iron_ingot", 2]]},
+
+  {"id": "miner", "tab": "industry", "kind": "crafter", "footprint": [3, 3, 3], "cost": [["iron_ingot", 10]],
+   "power_use": 10, "params": {"needs_node": true},
+   "ports": [{"cell": [1, 0, 0], "dir": "n", "io": "out"}]},
+
+  {"id": "smelter", "tab": "industry", "kind": "crafter", "footprint": [2, 3, 3], "cost": [["iron_ingot", 10]],
+   "power_use": 15,
+   "ports": [{"cell": [0, 0, 2], "dir": "s", "io": "in"}, {"cell": [0, 0, 0], "dir": "n", "io": "out"}]},
+
+  {"id": "assembler", "tab": "industry", "kind": "crafter", "footprint": [3, 3, 3], "cost": [["iron_ingot", 15], ["precision_part", 2]],
+   "power_use": 15,
+   "ports": [{"cell": [0, 0, 2], "dir": "s", "io": "in"}, {"cell": [2, 0, 2], "dir": "s", "io": "in"}, {"cell": [1, 0, 0], "dir": "n", "io": "out"}]},
+
+  {"id": "belt", "tab": "industry", "kind": "belt", "footprint": [1, 1, 1], "cost": [["iron_ingot", 1]],
+   "params": {"period": 5, "cells_per_cost": 4}},
+
+  {"id": "junction", "tab": "industry", "kind": "junction", "footprint": [1, 1, 1], "cost": [["iron_ingot", 4]],
+   "ports": [{"cell": [0, 0, 0], "dir": "n", "io": "any"}, {"cell": [0, 0, 0], "dir": "e", "io": "any"},
+             {"cell": [0, 0, 0], "dir": "s", "io": "any"}, {"cell": [0, 0, 0], "dir": "w", "io": "any"}]},
+
+  {"id": "storage", "tab": "industry", "kind": "storage", "footprint": [2, 3, 2], "cost": [["iron_ingot", 6]],
+   "params": {"slots": 24},
+   "ports": [{"cell": [0, 0, 1], "dir": "s", "io": "in"}, {"cell": [0, 0, 0], "dir": "n", "io": "out"}]},
+
+  {"id": "bio_generator", "tab": "industry", "kind": "generator", "footprint": [3, 3, 3], "cost": [["iron_ingot", 15]],
+   "power_gen": 50, "power_radius": 20, "params": {"fuel": {"biofuel": 300}, "fuel_cap": 10},
+   "ports": [{"cell": [1, 0, 2], "dir": "s", "io": "in"}]},
+
+  {"id": "power_pole", "tab": "industry", "kind": "power_pole", "footprint": [1, 4, 1], "cost": [["iron_ingot", 2]],
+   "power_radius": 20},
+
+  {"id": "workbench", "tab": "industry", "footprint": [2, 1, 2], "cost": [["iron_ingot", 4]]},
+  {"id": "plot",      "tab": "nature",   "footprint": [2, 1, 2], "cost": [["iron_ingot", 1]]},
+  {"id": "beacon",    "tab": "industry", "footprint": [3, 6, 3], "cost": [["energy_core", 1], ["iron_ingot", 30], ["precision_part", 4]]}
+]

@@ -1,7 +1,6 @@
 # Godot 4
 .godot/
 *.translation
-export_presets.cfg
 .import/
 # Builds
 build/

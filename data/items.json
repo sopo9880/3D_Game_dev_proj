@@ -1,0 +1,14 @@
+[
+  {"id": "iron_ore",         "name": "철광석",      "stack": 100, "category": "raw"},
+  {"id": "iron_ingot",       "name": "철 주괴",     "stack": 100, "category": "material"},
+  {"id": "glowleaf",         "name": "빛잎",        "stack": 100, "category": "crop"},
+  {"id": "glowleaf_seed",    "name": "빛잎 씨앗",   "stack": 100, "category": "seed"},
+  {"id": "biofuel",          "name": "바이오 연료", "stack": 50,  "category": "material"},
+  {"id": "scrap",            "name": "고철",        "stack": 100, "category": "raw"},
+  {"id": "precision_part",   "name": "정밀 부품",   "stack": 50,  "category": "part"},
+  {"id": "taint_crystal",    "name": "오염 결정",   "stack": 50,  "category": "raw"},
+  {"id": "purifier_capsule", "name": "정화 캡슐",   "stack": 20,  "category": "part"},
+  {"id": "energy_core",      "name": "에너지 코어", "stack": 5,   "category": "key"},
+  {"id": "rifle_ammo",       "name": "소총탄",      "stack": 300, "category": "ammo"},
+  {"id": "shell",            "name": "산탄",        "stack": 80,  "category": "ammo"}
+]

@@ -1,0 +1,37 @@
+; Engine configuration file.
+; Edenfall — Godot 4.7.2
+
+config_version=5
+
+[application]
+
+config/name="Edenfall"
+config/description="가꾸고, 자동화하고, 싸워서 되살리는 협동 게임"
+config/version="0.1.0.0"
+run/main_scene="res://game/range/range.tscn"
+config/features=PackedStringArray("4.7", "Forward Plus")
+
+[autoload]
+
+Registry="*res://core/registry.gd"
+
+[debug]
+
+gdscript/warnings/untyped_declaration=2
+gdscript/warnings/inferred_declaration=0
+gdscript/warnings/unsafe_cast=1
+
+[display]
+
+window/size/viewport_width=1600
+window/size/viewport_height=900
+
+[physics]
+
+3d/physics_engine="Jolt Physics"
+common/physics_ticks_per_second=60
+common/physics_interpolation=true
+
+[rendering]
+
+anti_aliasing/quality/msaa_3d=2

@@ -1,0 +1,118 @@
+name: build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GODOT_VERSION: "4.7.2"
+  GODOT_SHA512: "9aa00f7a605200940bce3027a567b782f49bd8e940dd06ae9e987bd65aee1b1467edd56ed84fcdcbdd44354bf613bdbb4e5d2913e925850368e150c59ed54c65"
+  TEMPLATES_SHA512: "ca4d71c4d7b81dfc15d1a98baa07534aa95b03fdda78a0075b06672e1648d2e5f40980c9adc28d23e1b92e732ee7bf3461997aa804af74ec2fcd7a93ccb84079"
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Godot
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/godot
+          key: godot-${{ env.GODOT_VERSION }}-windows-v1
+
+      - name: Download Godot and Windows export templates
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          mkdir -p ~/godot/templates && cd ~/godot
+          curl -fsSL -o godot.zip "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          echo "${GODOT_SHA512}  godot.zip" | sha512sum -c -
+          unzip -q godot.zip && mv Godot_v${GODOT_VERSION}-stable_linux.x86_64 godot && rm godot.zip
+          curl -fsSL -o templates.tpz "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          echo "${TEMPLATES_SHA512}  templates.tpz" | sha512sum -c -
+          unzip -q -j templates.tpz 'templates/windows_*x86_64*' 'templates/version.txt' -d templates
+          rm templates.tpz
+
+      - name: Install Godot
+        run: |
+          set -euo pipefail
+          dest=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          mkdir -p "$dest" && cp ~/godot/templates/* "$dest/"
+          sudo ln -sf ~/godot/godot /usr/local/bin/godot
+          godot --version
+
+      - name: Stamp build number
+        id: version
+        run: |
+          set -euo pipefail
+          base=$(sed -n 's/^config\/version="\([0-9]*\.[0-9]*\.[0-9]*\)\.[0-9]*"/\1/p' project.godot)
+          test -n "$base"
+          version="$base.${GITHUB_RUN_NUMBER}"
+          sed -i "s/^config\/version=.*/config\/version=\"$version\"/" project.godot
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version $version"
+
+      - name: Import project
+        run: godot --headless --import
+
+      - name: Unit tests
+        run: godot --headless -s tests/run_tests.gd
+
+      - name: Factory benchmark (slice scale)
+        run: godot --headless -s tools/bench_factory.gd -- --units=87 --budget-ms=4.0
+
+      - name: Export Windows build
+        run: |
+          set -euo pipefail
+          mkdir -p build/windows
+          godot --headless --export-release "Windows" build/windows/Edenfall.exe
+          test -s build/windows/Edenfall.exe
+          cp tools/TEST_BUILD_README.txt build/windows/README.txt
+
+      - name: Smoke test the exported pack
+        run: |
+          set -euo pipefail
+          godot --headless --export-pack "Windows" build/smoke.pck
+          cd "$RUNNER_TEMP" && timeout 180 godot --headless --main-pack "$GITHUB_WORKSPACE/build/smoke.pck" -- --selftest
+
+      - name: Package
+        run: cd build/windows && zip -q -r "../Edenfall-${{ steps.version.outputs.version }}-windows.zip" .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Edenfall-${{ steps.version.outputs.version }}-windows
+          path: build/Edenfall-*-windows.zip
+          if-no-files-found: error
+
+      # 태그가 아닌 푸시: 항상 같은 주소에서 받을 수 있는 최신 개발 빌드를 갱신한다.
+      - name: Publish rolling dev build
+        if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release delete dev-latest --cleanup-tag --yes || true
+          gh release create dev-latest build/Edenfall-*-windows.zip \
+            --prerelease --target "$GITHUB_SHA" \
+            --title "개발 빌드 ${{ steps.version.outputs.version }}" \
+            --notes "브랜치 ${GITHUB_REF_NAME} 의 최신 자동 빌드입니다. 압축을 풀고 Edenfall.exe 를 실행하세요. 조작법은 README.txt 에 있습니다."
+
+      # v0.1.0 같은 태그: 정식 릴리스.
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" build/Edenfall-*-windows.zip --title "$GITHUB_REF_NAME" --generate-notes
