@@ -90,6 +90,7 @@ jobs:
       - name: Smoke test the exported pack
         run: |
           set -euo pipefail
+          mkdir -p build
           godot --headless --export-pack "Windows" build/smoke.pck
           cd "$RUNNER_TEMP" && timeout 180 godot --headless --main-pack "$GITHUB_WORKSPACE/build/smoke.pck" -- --selftest
 
