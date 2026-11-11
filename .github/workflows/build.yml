@@ -87,6 +87,9 @@ jobs:
       - name: Multiplayer integration test (host + 3 clients)
         run: tools/net_test.sh
 
+      - name: Combat test (enemies, hit validation, grenade, down and respawn)
+        run: timeout 180 godot --headless -- --single --combattest
+
       - name: Smoke test the exported pack
         run: |
           set -euo pipefail

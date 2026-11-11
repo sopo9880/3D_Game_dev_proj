@@ -215,6 +215,9 @@ func _build_level() -> void:
 	_box(Vector3(14.5, 1.5, -28), Vector3(1, 3, 0.5), wall)
 	_box(Vector3(29.5, 1.5, -28), Vector3(1, 3, 0.5), wall)
 	_sign(Vector3(22, 0, -24), "달리다 앉기 = 슬라이딩")
+	# 벽 달리기 연습용 긴 벽
+	_box(Vector3(40, 2.5, -25), Vector3(0.5, 5, 30), wall)
+	_sign(Vector3(38, 0, -8), "벽 옆에서 달리며 점프 = 벽 달리기")
 	# 엄폐물
 	_box(Vector3(-6, 0.6, -6), Vector3(2.5, 1.2, 0.5), block)
 	_box(Vector3(-9, 1.0, -12), Vector3(0.5, 2.0, 3), block)
@@ -359,11 +362,30 @@ func _selftest() -> void:
 		errors.append("올라타기 실패: y=%.2f (기대 1.5)" % player.global_position.y)
 	player.teleport(Vector3(0, 0.05, 0), 0.0)
 
+	# 벽 달리기: 벽 옆에서 달리며 뛰면 보통 점프(약 0.7초)보다 오래 떠 있고, 점프를 또 누르면 벽 반대쪽으로 튄다.
+	player.teleport(Vector3(39.2, 0.05, -11), 0.0)
+	await _frames(10)
+	Input.action_press(&"sprint")
+	Input.action_press(&"move_forward")
+	await get_tree().create_timer(0.4).timeout
+	player._jump_buffer = 0.12
+	await get_tree().create_timer(0.85).timeout
+	if not player.wallrunning or player.global_position.y < 0.6:
+		errors.append("벽 달리기 실패: 달리는 중=%s y=%.2f" % [player.wallrunning, player.global_position.y])
+	player._jump_buffer = 0.12
+	await _frames(4)
+	if player.velocity.x > -3.0 or player.velocity.y < 3.0:
+		errors.append("벽 차기 실패: 속도 %s" % player.velocity)
+	Input.action_release(&"move_forward")
+	Input.action_release(&"sprint")
+	await _frames(40)
+	player.teleport(Vector3(0, 0.05, 0), 0.0)
+
 	# 전술 아레나 규칙: 달리기와 슬라이딩이 없고, 움직이면 탄이 크게 퍼지며, 소총 머리 한 발에 쓰러진다.
 	await _frames(20)
 	player.apply_profile(1)
 	await _frames(20)
-	if player.allow_sprint or player.allow_slide or player.allow_mantle or player.guns.size() != 3:
+	if player.allow_sprint or player.allow_slide or player.allow_mantle or player.allow_wallrun or player.guns.size() != 3:
 		errors.append("아레나 규칙이 적용되지 않음")
 	player.equip_by_id(&"rifle")
 	await _frames(20)

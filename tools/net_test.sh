@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 멀티플레이 통합 점검: 호스트 1 + 클라이언트 3(처음부터, 늦게 참가, 방문자 역할)을 띄우고
-# 같은 틱의 상태 해시가 모두 같은지 비교한다.
+# 같은 틱의 상태 해시가 모두 같은지, 전투(적 동기화, 사격 검증, 쓰러짐과 부활)가 전달되는지 본다.
 #   tools/net_test.sh [godot 실행 파일]
 set -uo pipefail
 GODOT="${1:-godot}"
@@ -35,6 +35,9 @@ count="$(grep -h '^NETTEST' "$OUT"/*.log | grep -c 'hash=')"
 grep -q 'NETTEST host .*players=4 remote_seen=3' "$OUT/host.log" || { echo "FAIL: 호스트가 3명의 위치를 받지 못했다"; fail=1; }
 grep -q 'NETTEST visitor .*rejected=no_permission' "$OUT/visitor.log" || { echo "FAIL: 방문자의 설치가 거절되지 않았다"; fail=1; }
 grep -q 'NETTEST late .*remote_seen=[1-9]' "$OUT/late.log" || { echo "FAIL: 늦게 온 참가자가 다른 플레이어를 보지 못했다"; fail=1; }
+[ "$(grep -h '^NETTEST' "$OUT"/*.log | grep -c 'enemies=0 died_seen=1')" = "4" ] || { echo "FAIL: 적 처치가 모든 프로세스에 전달되지 않았다"; fail=1; }
+grep -q 'NETTEST host .*bad_shots=[2-9]' "$OUT/host.log" || { echo "FAIL: 너무 빠른 사격 보고가 거절되지 않았다"; fail=1; }
+grep -q 'NETTEST late .*downed=true hp=\([3-9][0-9]\|100\)$' "$OUT/late.log" || { echo "FAIL: 쓰러진 플레이어가 동료에 의해 일어나지 못했다"; fail=1; }
 grep -h '^NETTEST' "$OUT"/*.log | grep -q 'resyncs=[1-9]' && { echo "FAIL: 재동기화가 발생했다(결정론이 깨짐)"; fail=1; }
 [ "$fail" = "0" ] && echo "NETTEST OK" || { echo "로그: $OUT"; }
 exit $fail

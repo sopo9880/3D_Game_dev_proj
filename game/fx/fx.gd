@@ -82,6 +82,36 @@ func damage_number(pos: Vector3, amount: float, head: bool, killed: bool) -> voi
 	tw.chain().tween_callback(label.queue_free)
 
 
+func explosion(pos: Vector3, radius: float) -> void:
+	var mesh := SphereMesh.new()
+	mesh.radius = 1.0
+	mesh.height = 2.0
+	var node := _mesh_node(mesh, _spark_mat)
+	node.global_position = pos
+	node.scale = Vector3.ONE * 0.3
+	var tw := node.create_tween().set_parallel()
+	tw.tween_property(node, "scale", Vector3.ONE * radius, 0.22).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+	tw.tween_property(node, "transparency", 1.0, 0.3)
+	tw.chain().tween_callback(node.queue_free)
+	var light := OmniLight3D.new()
+	light.light_color = Color(1.0, 0.7, 0.4)
+	light.omni_range = radius * 2.5
+	light.light_energy = 6.0
+	add_child(light)
+	light.global_position = pos + Vector3(0, 0.5, 0)
+	var lt := light.create_tween()
+	lt.tween_property(light, "light_energy", 0.0, 0.35)
+	lt.tween_callback(light.queue_free)
+
+
+## 작은 구체 하나(투사체 표시용). 호출한 쪽이 움직이고 지운다.
+func orb(color: Color, radius: float) -> MeshInstance3D:
+	var mesh := SphereMesh.new()
+	mesh.radius = radius
+	mesh.height = radius * 2.0
+	return _mesh_node(mesh, _unshaded(color))
+
+
 func _mesh_node(mesh: Mesh, mat: Material) -> MeshInstance3D:
 	var node := MeshInstance3D.new()
 	node.mesh = mesh

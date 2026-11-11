@@ -29,6 +29,9 @@ const TUNABLES: Array[Array] = [
 	["slide_friction", 1, 20, 0.5, "슬라이딩 감속"],
 	["mantle_max_height", 0.5, 3.0, 0.05, "올라타기 최대 높이"],
 	["mantle_speed", 0.5, 2.5, 0.05, "올라타기 빠르기"],
+	["wallrun_time", 0.3, 3.0, 0.05, "벽 달리기 시간 (초)"],
+	["wallrun_sink", 0.0, 8.0, 0.1, "벽 달리기 중 하강 속도"],
+	["wallkick_push", 2.0, 12.0, 0.1, "벽 차기 밀어내는 힘"],
 ]
 
 var sens_mult: float = 1.0
@@ -44,11 +47,15 @@ var slide_speed: float = 10.0
 var slide_friction: float = 7.0
 var mantle_max_height: float = 2.1   ## 발 기준. 이보다 높은 턱은 올라타지 못한다
 var mantle_speed: float = 1.0
+var wallrun_time: float = 1.2
+var wallrun_sink: float = 1.5
+var wallkick_push: float = 6.0
 
 ## 규칙 묶음(프로필)이 켜고 끄는 값. 협동과 아레나가 같은 컨트롤러를 다른 규칙으로 쓴다.
 var allow_sprint: bool = true
 var allow_slide: bool = true
 var allow_mantle: bool = true      ## 공중에서 앞으로 밀면 턱을 잡고 올라탄다
+var allow_wallrun: bool = true     ## 벽 달리기와 벽 차기
 var shift_walks: bool = false      ## true면 Shift가 달리기 대신 조용히 걷기(절반 속도)
 var profiles: Array = []
 var profile_index: int = -1
@@ -62,6 +69,8 @@ var gun: Gun
 var ads_amount: float = 0.0
 var sliding: bool = false
 var mantling: bool = false
+var wallrunning: bool = false
+var downed: bool = false           ## 쓰러짐: 움직이거나 쏠 수 없다(전투 시스템이 켜고 끈다)
 var crouching: bool = false
 
 # 통계 (사격장 표시용)
@@ -97,6 +106,10 @@ var _roll: float = 0.0
 var _switch_lock: float = 0.0
 var _empty_clicked: bool = false
 var _mantle_t: float = 0.0
+var _wall_normal: Vector3 = Vector3.ZERO
+var _wall_time: float = 0.0
+var _wall_cooldown: float = 0.0
+var _kick_normal: Vector3 = Vector3.ZERO   ## 마지막으로 찬 벽. 같은 벽을 연달아 찰 수 없다
 var _mantle_time: float = 0.3
 var _mantle_from: Vector3 = Vector3.ZERO
 var _mantle_to: Vector3 = Vector3.ZERO
@@ -104,9 +117,10 @@ var _base_values: Dictionary[String, Variant] = {}
 
 ## 프로필이 덮어쓸 수 있는 값. 감도와 시야각은 개인 설정이라 프로필이 건드리지 않는다.
 const PROFILE_KEYS: Array[String] = [
-	"allow_sprint", "allow_slide", "allow_mantle", "shift_walks",
+	"allow_sprint", "allow_slide", "allow_mantle", "allow_wallrun", "shift_walks",
 	"walk_speed", "sprint_speed", "crouch_speed", "ground_accel", "air_accel",
 	"jump_velocity", "gravity", "slide_speed", "slide_friction", "mantle_max_height", "mantle_speed",
+	"wallrun_time", "wallrun_sink", "wallkick_push",
 ]
 
 
@@ -120,6 +134,7 @@ func _ready() -> void:
 	add_child(_collider)
 	floor_snap_length = 0.25
 	floor_max_angle = deg_to_rad(46.0)
+	collision_mask = 3  # 지형(1) + 적(2)
 
 	# 카메라는 물리 보간을 끄고 매 프레임 직접 놓는다(시점 회전에 지연이 없어야 한다).
 	camera = Camera3D.new()
@@ -202,7 +217,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func is_active() -> bool:
-	return input_enabled and (force_active or Input.mouse_mode == Input.MOUSE_MODE_CAPTURED)
+	return not downed and input_enabled and (force_active or Input.mouse_mode == Input.MOUSE_MODE_CAPTURED)
 
 
 func _equip(index: int) -> void:
@@ -260,6 +275,31 @@ func _physics_process(delta: float) -> void:
 	if allow_mantle and active and not on_floor and not sliding and input.y < 0.0 and velocity.y > -9.0 and _try_mantle():
 		return
 
+	_wall_cooldown = maxf(_wall_cooldown - delta, 0.0)
+	if on_floor:
+		_kick_normal = Vector3.ZERO
+		wallrunning = false
+	elif allow_wallrun and active and not sliding:
+		# 벽 차기: 공중에서 벽 가까이 있을 때 점프.
+		if _jump_buffer > 0.0 and _coyote <= 0.0:
+			var kick_from := _wall_normal if wallrunning else _find_wall([0.0, PI * 0.5, -PI * 0.5, PI])
+			if kick_from != Vector3.ZERO and kick_from.dot(_kick_normal) < 0.9:
+				_wall_kick(kick_from)
+		if wallrunning:
+			if _wallrun_step(delta, input.y < 0.0):
+				return
+		elif _wall_cooldown <= 0.0 and input.y < 0.0 and velocity.y > -7.0 and horizontal_speed() > walk_speed * 0.8:
+			var side := _find_wall([PI * 0.5, -PI * 0.5])
+			var heading := Vector3(velocity.x, 0, velocity.z).normalized()
+			# 벽을 정면으로 들이받는 경우는 벽 달리기가 아니다.
+			if side != Vector3.ZERO and heading.dot(-side) < 0.75 and side.dot(_kick_normal) < 0.9:
+				wallrunning = true
+				_wall_normal = side
+				_wall_time = 0.0
+				velocity.y = maxf(velocity.y, 3.0)
+				if _wallrun_step(delta, true):
+					return
+
 	_coyote = 0.1 if on_floor else maxf(_coyote - delta, 0.0)
 	_jump_buffer = maxf(_jump_buffer - delta, 0.0)
 	_slide_cooldown = maxf(_slide_cooldown - delta, 0.0)
@@ -316,7 +356,7 @@ func _physics_process(delta: float) -> void:
 	elif not on_floor:
 		velocity.y -= gravity * delta
 
-	var target_height := CROUCH_HEIGHT if crouching else STAND_HEIGHT
+	var target_height := CROUCH_HEIGHT if (crouching or downed) else STAND_HEIGHT
 	_height = move_toward(_height, target_height, 6.0 * delta)
 	_shape.height = _height
 	_collider.position.y = _height * 0.5
@@ -329,6 +369,61 @@ func _physics_process(delta: float) -> void:
 			sfx.play(&"land", 0.08)
 		_fall_speed = 0.0
 	_was_on_floor = is_on_floor()
+
+
+## 몸 주변의 수직 벽을 찾는다. angles는 시선 방향 기준 각도(라디안). 벽의 법선, 없으면 ZERO.
+func _find_wall(angles: Array) -> Vector3:
+	var space := get_world_3d().direct_space_state
+	var from := global_position + Vector3(0, minf(_height * 0.6, 1.0), 0)
+	for angle: float in angles:
+		var dir := Basis(Vector3.UP, yaw + angle) * Vector3.FORWARD
+		var q := PhysicsRayQueryParameters3D.create(from, from + dir * (RADIUS + 0.5), 1)
+		q.exclude = [get_rid()]
+		var hit := space.intersect_ray(q)
+		if not hit.is_empty() and absf((hit["normal"] as Vector3).y) < 0.2:
+			var n: Vector3 = hit["normal"]
+			n.y = 0.0
+			return n.normalized()
+	return Vector3.ZERO
+
+
+## 벽 달리기 한 걸음. 계속 달리는 중이면 true(이 틱의 이동을 여기서 끝냈다).
+func _wallrun_step(delta: float, holding_forward: bool) -> bool:
+	_wall_time += delta
+	# 벽이 끝났거나, 시간이 다 됐거나, 앞으로 밀지 않으면 떨어진다.
+	var space := get_world_3d().direct_space_state
+	var from := global_position + Vector3(0, 1.0, 0)
+	var q := PhysicsRayQueryParameters3D.create(from, from - _wall_normal * (RADIUS + 0.7), 1)
+	q.exclude = [get_rid()]
+	if not holding_forward or _wall_time > wallrun_time or space.intersect_ray(q).is_empty():
+		wallrunning = false
+		_wall_cooldown = 0.35
+		return false
+	var tangent := _wall_normal.cross(Vector3.UP)
+	if tangent.dot(Vector3(velocity.x, 0, velocity.z)) < 0.0:
+		tangent = -tangent
+	var speed := maxf(horizontal_speed(), sprint_speed)
+	velocity.x = tangent.x * speed - _wall_normal.x * 1.5
+	velocity.z = tangent.z * speed - _wall_normal.z * 1.5
+	velocity.y = move_toward(velocity.y, -wallrun_sink, 9.0 * delta)
+	move_and_slide()
+	if is_on_floor():
+		wallrunning = false
+	_was_on_floor = is_on_floor()
+	return true
+
+
+func _wall_kick(normal: Vector3) -> void:
+	var horiz := Vector3(velocity.x, 0, velocity.z)
+	# 벽으로 파고드는 성분을 없애고 벽 반대쪽으로 민다.
+	horiz -= normal * minf(horiz.dot(normal), 0.0)
+	horiz = horiz * 0.8 + normal * wallkick_push
+	velocity = Vector3(horiz.x, jump_velocity * 0.95, horiz.z)
+	_kick_normal = normal
+	_jump_buffer = 0.0
+	wallrunning = false
+	_wall_cooldown = 0.2
+	sfx.play(&"jump", 0.08)
 
 
 ## 앞에 올라탈 수 있는 턱이 있으면 올라타기를 시작한다.
@@ -438,6 +533,10 @@ func _process(delta: float) -> void:
 
 	var strafe := Vector3(velocity.x, 0, velocity.z).dot(Basis(Vector3.UP, yaw).x) / sprint_speed
 	var roll_target := -strafe * 0.02 - (0.07 if sliding else 0.0)
+	if wallrunning:
+		roll_target = -0.2 * signf(_wall_normal.dot(Basis(Vector3.UP, yaw).x))
+	if downed:
+		roll_target = 0.5
 	_roll = lerpf(_roll, roll_target, 1.0 - exp(-10.0 * delta))
 
 	var shake_offset := Vector2(randf_range(-1, 1), randf_range(-1, 1)) * deg_to_rad(_shake * 0.6)
@@ -467,6 +566,7 @@ func _shoot() -> void:
 	viewmodel.kick(gun.def, ads)
 	sfx.play(StringName("shot_" + String(gun.def.id)), 0.04)
 	stat_shots += 1
+	Combat.begin_shot(gun.def.id, viewmodel.muzzle_position(), camera.global_position - camera.global_basis.z * 60.0)
 	shot_fired.emit()
 
 	var origin := camera.global_position

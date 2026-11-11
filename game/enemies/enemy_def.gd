@@ -1,0 +1,46 @@
+class_name EnemyDef
+extends RefCounted
+## 적 정의. data/enemies.json 한 항목.
+
+var id: StringName
+var index: int = 0
+var display_name: String
+var kind: StringName = &"melee"
+var hp: float = 50.0
+var speed: float = 4.0
+var aggro_range: float = 40.0
+var attack_damage: float = 10.0
+var attack_range: float = 2.0
+var attack_windup: float = 0.3
+var attack_interval: float = 1.0
+var keep_min: float = 0.0
+var keep_max: float = 0.0
+var projectile_speed: float = 18.0
+var radius: float = 0.4
+var height: float = 1.2
+var head_radius: float = 0.2
+var loot: Array = []
+
+
+static func load_all(path: String) -> Array[EnemyDef]:
+	var out: Array[EnemyDef] = []
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+	if not parsed is Array:
+		push_error("적 데이터를 읽을 수 없음: %s" % path)
+		return out
+	for row: Dictionary in parsed:
+		var d := EnemyDef.new()
+		d.id = StringName(str(row.get("id", "")))
+		d.display_name = str(row.get("name", d.id))
+		d.index = out.size()
+		for key: String in row:
+			if key in ["id", "name"]:
+				continue
+			var cur: Variant = d.get(key)
+			match typeof(cur):
+				TYPE_FLOAT: d.set(key, float(row[key]))
+				TYPE_STRING_NAME: d.set(key, StringName(str(row[key])))
+				TYPE_ARRAY: d.set(key, row[key])
+				_: push_warning("적 %s: 모르는 항목 '%s'" % [d.id, key])
+		out.append(d)
+	return out

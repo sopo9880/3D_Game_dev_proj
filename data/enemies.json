@@ -1,0 +1,14 @@
+[
+  {"id": "crawler", "name": "돌진형", "kind": "melee",
+   "hp": 60, "speed": 6.0, "aggro_range": 45,
+   "attack_damage": 15, "attack_range": 1.9, "attack_windup": 0.35, "attack_interval": 1.0,
+   "radius": 0.45, "height": 1.1, "head_radius": 0.22,
+   "loot": [["scrap", 1, 0.6], ["taint_crystal", 1, 0.4]]},
+
+  {"id": "spitter", "name": "원거리형", "kind": "ranged",
+   "hp": 40, "speed": 3.5, "aggro_range": 50,
+   "attack_damage": 10, "attack_range": 30, "attack_windup": 0.4, "attack_interval": 2.0,
+   "keep_min": 12, "keep_max": 24, "projectile_speed": 18,
+   "radius": 0.4, "height": 1.5, "head_radius": 0.24,
+   "loot": [["taint_crystal", 1, 0.7], ["scrap", 1, 0.3]]}
+]

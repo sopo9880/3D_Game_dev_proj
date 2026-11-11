@@ -34,7 +34,8 @@ var _target_tick: int = 0
 var _synced: Array[int] = []                       ## 호스트: 스냅샷을 받은 피어
 var _snapshot_parts: Array[PackedByteArray] = []   ## 클라이언트: 받는 중인 스냅샷
 var _snapshot_size: int = 0
-var _last_player_pos: Dictionary[int, Vector3] = {}
+## 피어 → 마지막으로 알려진 위치. 호스트는 전원의 위치를, 클라이언트는 자신과 받은 사람들의 위치를 안다.
+var positions: Dictionary[int, Vector3] = {}
 var _last_player_time: Dictionary[int, float] = {}
 
 
@@ -56,8 +57,13 @@ func stop() -> void:
 
 func forget_peer(peer_id: int) -> void:
 	_synced.erase(peer_id)
-	_last_player_pos.erase(peer_id)
+	positions.erase(peer_id)
 	_last_player_time.erase(peer_id)
+
+
+## 호스트: 월드 스냅샷을 받아 이벤트를 받을 수 있는 피어들.
+func synced_peers() -> Array[int]:
+	return _synced
 
 
 ## 틱과 틱 사이의 진행 비율(0..1). 화면 보간용.
@@ -369,6 +375,7 @@ func _snap_chunk(index: int, data: PackedByteArray) -> void:
 func send_player_state(pos: Vector3, yaw: float, pitch: float, crouch: bool) -> void:
 	if not running:
 		return
+	positions[multiplayer.get_unique_id()] = pos
 	var peer := multiplayer.multiplayer_peer
 	if peer == null or peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED:
 		return
@@ -389,11 +396,11 @@ func _req_player(pos: Vector3, yaw: float, pitch: float, crouch: bool) -> void:
 	if absf(pos.x) > MAX_COORD or absf(pos.y) > MAX_COORD or absf(pos.z) > MAX_COORD:
 		return
 	var now := Time.get_ticks_msec() / 1000.0
-	if _last_player_pos.has(sender):
+	if positions.has(sender):
 		var dt := maxf(now - _last_player_time[sender], 0.05)
-		if pos.distance_to(_last_player_pos[sender]) / dt > MAX_PLAYER_SPEED:
+		if pos.distance_to(positions[sender]) / dt > MAX_PLAYER_SPEED:
 			return
-	_last_player_pos[sender] = pos
+	positions[sender] = pos
 	_last_player_time[sender] = now
 	remote_player_state.emit(sender, pos, yaw, pitch, crouch)
 	for p in _synced:
@@ -403,6 +410,7 @@ func _req_player(pos: Vector3, yaw: float, pitch: float, crouch: bool) -> void:
 
 @rpc("authority", "call_remote", "unreliable_ordered")
 func _ev_player(peer_id: int, pos: Vector3, yaw: float, pitch: float, crouch: bool) -> void:
+	positions[peer_id] = pos
 	remote_player_state.emit(peer_id, pos, yaw, pitch, crouch)
 
 

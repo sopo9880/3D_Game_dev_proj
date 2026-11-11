@@ -5,6 +5,10 @@ extends Control
 var player: PlayerController
 var message: String = ""          ## 화면 위쪽 안내(도전 모드 등)
 var help_lines: Array = []        ## 비어 있으면 사격장용 기본 도움말
+var health: float = -1.0          ## 0 미만이면 체력 표시를 숨긴다
+var grenades: int = -1
+var side_text: String = ""        ## 오른쪽 가운데(소지품 등)
+var center_text: String = ""      ## 화면 가운데 큰 안내(쓰러짐 등)
 
 var _hit_time: float = 0.0
 var _hit_color: Color = Color.WHITE
@@ -14,6 +18,11 @@ var _help: Label
 var _top: Label
 var _paused: Label
 var _version: Label
+var _side: Label
+var _center: Label
+var _toast: Label
+var _toast_time: float = 0.0
+var _hurt: float = 0.0
 
 
 func _ready() -> void:
@@ -29,8 +38,17 @@ func _ready() -> void:
 	_top.offset_bottom = 48.0
 	_version.text = "Edenfall  v%s" % ProjectSettings.get_setting("application/config/version", "?")
 	_version.modulate.a = 0.7
+	_side = _label(Control.PRESET_CENTER_RIGHT, 16, HORIZONTAL_ALIGNMENT_RIGHT)
+	_side.anchor_top = 0.4
+	_side.anchor_bottom = 0.4
+	_center = _label(Control.PRESET_CENTER, 34, HORIZONTAL_ALIGNMENT_CENTER)
+	_center.anchor_top = 0.38
+	_center.anchor_bottom = 0.38
+	_toast = _label(Control.PRESET_CENTER, 20, HORIZONTAL_ALIGNMENT_CENTER)
+	_toast.anchor_top = 0.72
+	_toast.anchor_bottom = 0.72
 	_help.text = "\n".join([
-		"WASD 이동 · Shift 달리기 · Space 점프 (턱 앞에서 앞으로 밀면 올라타기) · Ctrl/C 앉기 (달리다 앉으면 슬라이딩)",
+		"WASD 이동 · Shift 달리기 · Space 점프 (턱 앞에서 앞으로 밀면 올라타기) · Ctrl/C 앉기 (달리다 앉으면 슬라이딩) · 벽 옆에서 달리며 점프 = 벽 달리기, 다시 점프 = 벽 차기",
 		"좌클릭 사격 · 우클릭 조준 · R 재장전 · 1/2/3 또는 휠 무기 교체",
 		"F2 규칙 전환 (협동 ↔ 전술 아레나) · F1 수치 조정 · [ ] 감도 · T 표적 도전 · F5 통계 초기화 · F11 전체 화면 · H 도움말 · Esc 일시정지",
 	])
@@ -42,6 +60,17 @@ func _ready() -> void:
 func on_hit(_damage: float, head: bool, killed: bool) -> void:
 	_hit_time = 0.22 if killed else 0.14
 	_hit_color = Color(1.0, 0.25, 0.2) if killed else (Color(1.0, 0.85, 0.2) if head else Color.WHITE)
+
+
+## 잠깐 떴다 사라지는 알림(전리품 획득 등).
+func toast(text: String) -> void:
+	_toast.text = text
+	_toast_time = 2.5
+
+
+## 피해를 입었을 때 화면 가장자리가 붉게 번쩍인다.
+func hurt() -> void:
+	_hurt = 1.0
 
 
 func toggle_help() -> void:
@@ -61,6 +90,11 @@ func _process(delta: float) -> void:
 		player.profile_name(), Engine.get_frames_per_second(), player.horizontal_speed(), player.sens_mult,
 		player.stat_shots, player.stat_hits, acc, head_rate, player.stat_kills, roundi(player.stat_damage)]
 	_top.text = message
+	_side.text = side_text
+	_center.text = center_text
+	_toast_time = maxf(_toast_time - delta, 0.0)
+	_toast.modulate.a = clampf(_toast_time, 0.0, 1.0)
+	_hurt = maxf(_hurt - delta * 2.5, 0.0)
 	_paused.visible = Input.mouse_mode != Input.MOUSE_MODE_CAPTURED and player.input_enabled
 	queue_redraw()
 
@@ -69,6 +103,21 @@ func _draw() -> void:
 	if player == null or player.camera == null:
 		return
 	var c := size * 0.5
+	if _hurt > 0.0:
+		var edge := Color(0.9, 0.1, 0.1, 0.35 * _hurt)
+		var w := 60.0
+		draw_rect(Rect2(0, 0, size.x, w), edge)
+		draw_rect(Rect2(0, size.y - w, size.x, w), edge)
+		draw_rect(Rect2(0, w, w, size.y - w * 2.0), edge)
+		draw_rect(Rect2(size.x - w, w, w, size.y - w * 2.0), edge)
+	if health >= 0.0:
+		var bar := Rect2(c.x - 130.0, size.y - 150.0, 260.0, 16.0)
+		draw_rect(bar.grow(3.0), Color(0, 0, 0, 0.55))
+		var frac := clampf(health / CombatRules.MAX_HP, 0.0, 1.0)
+		var bar_color := Color(0.35, 0.85, 0.45) if frac > 0.35 else Color(0.9, 0.3, 0.25)
+		draw_rect(Rect2(bar.position, Vector2(bar.size.x * frac, bar.size.y)), bar_color)
+		for i in maxi(grenades, 0):
+			draw_circle(Vector2(bar.end.x + 24.0 + i * 20.0, bar.position.y + 8.0), 7.0, Color(0.95, 0.8, 0.3))
 	# 탄퍼짐 원뿔이 화면에서 차지하는 반지름(픽셀).
 	var spread := deg_to_rad(player.current_spread())
 	var gap := tan(spread) / tan(deg_to_rad(player.camera.fov * 0.5)) * size.y * 0.5
@@ -104,7 +153,7 @@ func _label(preset: Control.LayoutPreset, font_size: int, align: HorizontalAlign
 	var ay := 0.0
 	if preset == Control.PRESET_BOTTOM_LEFT or preset == Control.PRESET_BOTTOM_RIGHT:
 		ay = 1.0
-	elif preset == Control.PRESET_CENTER:
+	elif preset == Control.PRESET_CENTER or preset == Control.PRESET_CENTER_RIGHT:
 		ay = 0.62
 	l.anchor_left = ax
 	l.anchor_right = ax
