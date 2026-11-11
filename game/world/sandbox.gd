@@ -68,7 +68,7 @@ func _ready() -> void:
 		"벽 옆에서 달리며 점프 = 벽 달리기, 다시 점프 = 벽 차기 · 뒤쪽(+Z) 담장 안이 전투 구역",
 		"B 건축 모드 (Tab 탭 · 휠 선택 · R 회전 · 좌클릭 설치 · X 철거 · F 같은 것 고르기 · Z 되돌리기 · Esc 닫기) · E 설비 열기",
 		"노란 띠 안쪽이 건축 구역. 화살표는 설비의 입력(파랑)과 출력(주황)",
-		"N 기준 생산 라인 한 벌(개발용, 호스트) · Esc 마우스 풀기",
+		"N 기준 생산 라인 한 벌 · F9 부하 시험(설비 504개를 한 번에, 프레임 측정용) — 개발용, 호스트만 · Esc 마우스 풀기",
 		"F6 저장 · F10 저장하고 나가기 (5분마다 자동 저장)",
 	]
 	layer.add_child(hud)
@@ -149,6 +149,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			hud.toast("이미 저장하는 중입니다")
 	elif event.is_action_pressed(&"save_and_exit"):
 		Net.leave()
+	elif event.is_action_pressed(&"dev_stress"):
+		if not Net.is_host():
+			hud.toast("부하 시험은 호스트만 (개발용)")
+		else:
+			var built := World.dev_stress()
+			hud.toast("부하 시험: 설비 %d개를 지었습니다. 왼쪽 위 FPS를 보세요" % built if built > 0 else "부하 시험 공장은 이미 지어져 있습니다")
+			player.teleport(Vector3(0, 12, 84), PI)
 	elif event.is_action_pressed(&"toggle_fullscreen"):
 		var full := DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED if full else DisplayServer.WINDOW_MODE_FULLSCREEN)
@@ -749,6 +756,20 @@ func _build_test() -> void:
 		errors.append("높은 단의 2층 바닥 설치 실패: %s" % build.reason)
 	build.set_active(false)
 
+	# 부하 시험 공장: 설비 504개가 서고, 돌아가고, 다시 눌러도 늘지 않는다.
+	var built := World.dev_stress()
+	if built != 504 or World.dev_stress() != 0:
+		errors.append("부하 시험 공장 설비 %d개 (기대 504)" % built)
+	var miners_before := 0
+	for m in World.sim.crafters:
+		miners_before += m.produced_total
+	await _wait(3.0)
+	var produced := -miners_before
+	for m in World.sim.crafters:
+		produced += m.produced_total
+	if produced < 200:   # 채굴기 72대 × 초당 1개 × 3초
+		errors.append("부하 시험 공장이 돌지 않음 (3초간 생산 %d)" % produced)
+
 	# 너무 먼 설비는 쓸 수 없다.
 	player.teleport(Vector3(60, 0.05, 60), 0.0)
 	await _wait(0.3)
@@ -770,7 +791,7 @@ func _build_test() -> void:
 		errors.append("비동기 저장 실패 (%s)" % str(result))
 
 	if errors.is_empty():
-		print("BUILDTEST OK (구조물 %d)" % World.sim.structures.size())  # 9 + 높은 단의 4
+		print("BUILDTEST OK (구조물 %d)" % World.sim.structures.size())  # 9 + 높은 단의 4 + 부하 시험 공장
 	else:
 		for e in errors:
 			print("BUILDTEST FAIL: %s" % e)

@@ -28,6 +28,9 @@ const MAX_PLAYER_SPEED := 40.0   ## m/s. 이보다 빠른 이동 보고는 무�
 ## 개발용 월드의 광맥 자리(기준 생산 라인의 원점). 실제 맵이 생기면 맵 데이터로 대체한다.
 ## 개발용 월드의 건축 구역: [x, z, 폭, 깊이, 지면 높이]. 정원 평지와 3m 높은 단 하나.
 const DEV_BUILD_ZONES: Array[Array] = [[-44, -64, 88, 76, 0], [48, -40, 28, 28, 3]]
+## 개발용 부하 시험 구역: 기준 생산 라인을 격자로 깐다(프레임 측정용).
+const DEV_STRESS_ZONE: Array[int] = [-184, 88, 368, 96, 0]
+const DEV_STRESS_LINES := 72     ## 설비 504개
 const DEV_LINE_ORIGINS: Array[Vector3i] = [
 	Vector3i(-24, 0, -45), Vector3i(-8, 0, -45), Vector3i(8, 0, -45), Vector3i(24, 0, -45),
 ]
@@ -218,6 +221,15 @@ func register_player(peer_id: int) -> void:
 func _ev_spawn(pos: Vector3, yaw: float) -> void:
 	my_spawn = [pos, yaw]
 	spawn_assigned.emit(pos, yaw)
+
+
+## 호스트(개발용): 부하 시험 구역에 기준 생산 라인을 한꺼번에 짓는다. 지은 설비 수를 돌려준다.
+func dev_stress() -> int:
+	if not multiplayer.is_server() or not running:
+		return 0
+	var before := sim.structures.size() - sim.belts.size()
+	_emit_event("stress", [DEV_STRESS_LINES])
+	return sim.structures.size() - sim.belts.size() - before
 
 
 ## 호스트: 아이템을 준다(전리품 등). items는 아이템 ID(문자열) → 수량.
@@ -447,6 +459,9 @@ func _apply(op: String, a: Array) -> void:
 		"consume":
 			var n := sim.inv_remove(a[2], db.item_index(StringName(a[0])), a[1])
 			consumed.emit(a[2], StringName(a[0]), n)
+		"stress":
+			_apply_stress(a[0])
+			reset.emit()
 		"join":
 			sim.ensure_player(a[0])
 		"grant":
@@ -455,6 +470,27 @@ func _apply(op: String, a: Array) -> void:
 				sim.inv_add(a[0], db.item_index(StringName(id)), int(items[id]))
 			items_gained.emit(a[0], items)
 	inventory_changed.emit()
+
+
+## 부하 시험용 공장. 비용 없이 짓고 발전기에 연료를 채워 둔다. 모든 피어에서 같은 결과가 나온다.
+func _apply_stress(lines: int) -> void:
+	var z := DEV_STRESS_ZONE
+	if sim.ground_y(z[0], z[1]) == SimWorld.NO_GROUND:
+		sim.add_build_zone(z[0], z[1], z[2], z[3], z[4])
+	var cols := z[2] / 16
+	var fuel := Registry.db.item_index(&"biofuel")
+	for i in lines:
+		var origin := Vector3i(z[0] + 2 + (i % cols) * 16, z[4], z[1] + (i / cols) * 24)
+		if sim.occupancy.has(origin + (ReferenceLine.MACHINES[0][1] as Vector3i)):
+			continue
+		sim.add_node(origin + ReferenceLine.NODE_CELL, &"iron_ore")
+		for m in ReferenceLine.MACHINES:
+			var s := sim.place(m[0], origin + (m[1] as Vector3i), 0, "dev")
+			if s != null and s.kind == StructureDef.Kind.GENERATOR:
+				s.fuel_item = fuel
+				s.fuel_count = int(s.def.params.get("fuel_cap", 10))
+		for b in ReferenceLine.BELTS.size():
+			sim.place_belt(&"belt", ReferenceLine.belt_path(origin, b), "dev")
 
 
 func _added(s: SimStructure) -> void:
