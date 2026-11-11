@@ -10,6 +10,10 @@ const SOLO_RESPAWN_SECONDS := 3.0
 const REVIVE_RANGE := 3.0
 const REVIVE_HP := 30.0
 const MAX_HIT_DISTANCE := 150.0
+const MELEE_DAMAGE := 45.0
+const MELEE_INTERVAL := 0.6      ## 근접 공격 사이의 최소 간격(초)
+const MELEE_MAX_DISTANCE := 4.5  ## 호스트가 인정하는 최대 거리(지연을 감안한 여유 포함)
+const MELEE_MAX_TARGETS := 3
 const GRENADE_MAX := 3
 const GRENADE_RADIUS := 5.0
 const GRENADE_DAMAGE := 120.0
@@ -42,6 +46,15 @@ static func check_shot(def: WeaponDef, pellet_count: int, since_last: float) -> 
 		return "too_many_pellets"
 	# 지연과 프레임 오차를 감안해 연사 간격의 60%까지는 받아 준다.
 	if since_last < 60.0 / maxf(def.rpm, 1.0) * 0.6:
+		return "too_fast"
+	return ""
+
+
+## 근접 공격 보고를 받아들일지. 문제가 없으면 빈 문자열.
+static func check_melee(target_count: int, since_last: float) -> String:
+	if target_count <= 0 or target_count > MELEE_MAX_TARGETS:
+		return "too_many_targets"
+	if since_last < MELEE_INTERVAL * 0.6:
 		return "too_fast"
 	return ""
 

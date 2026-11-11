@@ -98,6 +98,12 @@ func kick(def: WeaponDef, ads: bool) -> void:
 	_flash_light.light_energy = 2.5
 
 
+## 근접 공격: 총을 앞으로 내지른다.
+func melee() -> void:
+	_kick_pos_vel -= 7.0
+	_kick_rot_vel -= 520.0
+
+
 ## 총을 잠깐 내린다(올라타기 등 손을 쓰는 동작).
 func dip(amount: float) -> void:
 	_switch_drop = maxf(_switch_drop, amount)

@@ -75,6 +75,7 @@ var _next_projectile_id: int = 1
 var _projectiles: Array[Projectile] = []
 var _grenades: Dictionary[int, int] = {}
 var _last_shot: Dictionary[int, float] = {}
+var _last_melee: Dictionary[int, float] = {}
 var _enemy_timer: float = 0.0
 var _vitals_timer: float = 0.0
 var _hit_weapon: StringName = &""
@@ -147,6 +148,7 @@ func _sync_players() -> void:
 			vitals.erase(peer)
 			_grenades.erase(peer)
 			_last_shot.erase(peer)
+			_last_melee.erase(peer)
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +405,42 @@ func _do_hits(sender: int, weapon_id: String, ids: PackedInt32Array, heads: Pack
 		if dist > CombatRules.MAX_HIT_DISTANCE:
 			continue
 		_damage_enemy(e, CombatRules.hit_damage(def, dist, heads[i] != 0), sender)
+
+
+## 근접 공격이 맞았다고 보고한다.
+func report_melee(enemy_ids: PackedInt32Array) -> void:
+	if not is_bound():
+		return
+	if multiplayer.is_server():
+		_do_melee(1, enemy_ids)
+	elif World.running:
+		_req_melee.rpc_id(1, enemy_ids)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _req_melee(enemy_ids: PackedInt32Array) -> void:
+	if multiplayer.is_server():
+		_do_melee(multiplayer.get_remote_sender_id(), enemy_ids)
+
+
+func _do_melee(sender: int, enemy_ids: PackedInt32Array) -> void:
+	if not is_bound():
+		return
+	var now := Time.get_ticks_msec() / 1000.0
+	var why := CombatRules.check_melee(enemy_ids.size(), now - float(_last_melee.get(sender, -99.0)))
+	if why == "" and (not is_alive(sender) or not World.positions.has(sender)):
+		why = "not_alive"
+	if why != "":
+		rejected_shots += 1
+		return
+	_last_melee[sender] = now
+	var from := World.positions[sender]
+	for id in enemy_ids:
+		var e: Enemy = enemies.get(id)
+		if e == null or e.hp <= 0.0 or from.distance_to(e.global_position) > CombatRules.MELEE_MAX_DISTANCE:
+			continue
+		e.stagger(e.global_position - from)
+		_damage_enemy(e, CombatRules.MELEE_DAMAGE, sender)
 
 
 func _damage_enemy(e: Enemy, amount: float, by: int) -> void:

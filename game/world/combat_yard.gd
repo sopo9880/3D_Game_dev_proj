@@ -35,6 +35,9 @@ func _ready() -> void:
 	_box(Vector3(-25, 3.0, 37), Vector3(4, 2, 4), block)
 	_box(Vector3(-13.5, 0.95, 34), Vector3(8, 0.3, 4), block, Vector3(0, 0, -14.5))
 
+	# 매달리기: 3.5m 단. 뛰어서 올라타기로는 닿지 않고, 턱을 붙잡아야 오른다
+	_box(Vector3(-22, 1.75, 50), Vector3(6, 3.5, 6), block)
+
 	# 벽 달리기: 긴 벽 둘 사이의 통로(폭 5m)와 건너뛰는 간격
 	_box(Vector3(20, 2.5, 30), Vector3(0.6, 5, 16), wall)
 	_box(Vector3(25.6, 2.5, 30), Vector3(0.6, 5, 16), wall)

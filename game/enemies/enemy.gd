@@ -28,6 +28,7 @@ var _strafe_time: float = 0.0
 var _evade: float = 0.0
 var _phase: float = 0.0
 var _flash: float = 0.0
+var _stun: float = 0.0
 var _mat: StandardMaterial3D
 var _label: Label3D
 var _visual: Node3D
@@ -105,6 +106,21 @@ func take_hit(_damage: float, head: bool, _pos: Vector3) -> bool:
 	return false
 
 
+## 맞았다는 표시만 한다(판정은 호스트가 따로 한다).
+func flash() -> void:
+	_flash = 1.0
+
+
+## 호스트: 근접 공격에 맞아 움찔한다. 하던 공격이 끊기고 뒤로 밀린다.
+func stagger(away: Vector3) -> void:
+	_windup = -1.0
+	attacking = false
+	_attack_cd = maxf(_attack_cd, 0.7)
+	_stun = 0.35
+	away.y = 0.0
+	velocity = away.normalized() * 4.0 + Vector3(0, 2.0, 0)
+
+
 ## 호스트: 피해를 입었다. 원거리형은 자리를 옮긴다.
 func on_damaged() -> void:
 	_flash = 1.0
@@ -137,6 +153,12 @@ func _physics_process(delta: float) -> void:
 	var horizontal := Vector3.ZERO
 	var target := Combat.nearest_alive_player(global_position, def.aggro_range)
 	var peer: int = target[0]
+	_stun = maxf(_stun - delta, 0.0)
+	if _stun > 0.0:
+		# 움찔하는 동안은 밀려나기만 한다.
+		velocity.y -= GRAVITY * delta
+		move_and_slide()
+		return
 	if peer >= 0:
 		var goal: Vector3 = target[1]
 		var to := goal - global_position

@@ -64,7 +64,8 @@ func _ready() -> void:
 	hud.player = player
 	hud.help_lines = [
 		"WASD 이동 · Shift 달리기 · Space 점프 (턱 앞에서 앞으로 밀면 올라타기) · Ctrl 앉기/슬라이딩",
-		"좌클릭 사격 · 우클릭 조준 · R 재장전 · 1/2/3 무기 · G 수류탄 · E 동료 일으키기",
+		"좌클릭 사격 · 우클릭 조준 · R 재장전 · V 근접 공격 · 1/2/3 무기 · G 수류탄 · E 동료 일으키기",
+		"높은 턱은 붙잡고 매달린다 (W 오르기 · A/D 옆걸음 · S 놓기 · 벽을 등지고 점프하면 차고 나가기)",
 		"벽 옆에서 달리며 점프 = 벽 달리기, 다시 점프 = 벽 차기 · 뒤쪽(+Z) 담장 안이 전투 구역",
 		"B 건축 모드 (Tab 탭 · 휠 선택 · R 회전 · 좌클릭 설치 · X 철거 · F 같은 것 고르기 · Z 되돌리기 · Esc 닫기) · E 설비 열기",
 		"노란 띠 안쪽이 건축 구역. 화살표는 설비의 입력(파랑)과 출력(주황)",
@@ -461,6 +462,36 @@ func _combat_test() -> void:
 		errors.append("거절된 보고가 피해를 줌 (체력 %.1f / %.1f)" % [dummy.hp, dummy.max_hp])
 	Combat._damage_enemy(dummy, 9999.0, 1)
 
+	# 근접 공격: 돌진형(체력 60)은 두 번에 쓰러지고, 맞으면 움찔해 공격이 끊긴다.
+	await _wait(5.5)
+	player.teleport(Vector3(-10, 0.05, 20), PI)
+	await _wait(0.3)
+	var kills_melee := Combat.kills
+	var brawler := Combat.spawn_enemy(&"crawler", Vector3(-10, 0.1, 22.2))
+	await _wait(0.25)
+	_aim_at(brawler.global_position + Vector3(0, 0.6, 0))
+	await get_tree().process_frame
+	player.try_melee()
+	await _wait(0.1)
+	if not is_instance_valid(brawler) or absf(brawler.hp - (60.0 - CombatRules.MELEE_DAMAGE)) > 0.01 or brawler.attacking:
+		errors.append("근접 공격 1타: 체력 %.0f, 공격 중=%s" % [brawler.hp if is_instance_valid(brawler) else -1.0, brawler.attacking if is_instance_valid(brawler) else false])
+	Combat._do_melee(1, PackedInt32Array([brawler.net_id]))   # 너무 빠른 보고는 거절된다
+	if is_instance_valid(brawler) and brawler.hp < 10.0:
+		errors.append("너무 빠른 근접 공격 보고가 받아들여짐")
+	await _wait(CombatRules.MELEE_INTERVAL)
+	# 밀려났던 적이 다시 닿는 거리로 올 때까지 기다린다.
+	var waited_melee := 0.0
+	while is_instance_valid(brawler) and brawler.global_position.distance_to(player.global_position) > 2.2 and waited_melee < 3.0:
+		await _wait(0.05)
+		waited_melee += 0.05
+	if is_instance_valid(brawler):
+		_aim_at(brawler.global_position + Vector3(0, 0.6, 0))
+		await get_tree().process_frame
+		player.try_melee()
+	await _wait(0.2)
+	if Combat.kills - kills_melee != 1:
+		errors.append("근접 공격 두 번으로 돌진형을 쓰러뜨리지 못함")
+
 	# 원거리형: 시야가 트인 곳에서 침을 쏴 맞힌다.
 	await _wait(5.5)   # 체력 회복 대기
 	player.teleport(Vector3(-20, 0.05, 20), PI)
@@ -508,7 +539,7 @@ func _combat_test() -> void:
 		errors.append("다시 일어나지 못함 (쓰러짐=%s, 위치 %s)" % [player.downed, player.global_position])
 
 	if errors.is_empty():
-		print("COMBATTEST OK (처치 %d)" % Combat.kills)
+		print("COMBATTEST OK (처치 %d)" % Combat.kills)  # 소총 1 + 근접 1 + 정리 2 + 수류탄 3
 	else:
 		for e in errors:
 			print("COMBATTEST FAIL: %s" % e)

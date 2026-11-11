@@ -215,6 +215,9 @@ func _build_level() -> void:
 	_box(Vector3(14.5, 1.5, -28), Vector3(1, 3, 0.5), wall)
 	_box(Vector3(29.5, 1.5, -28), Vector3(1, 3, 0.5), wall)
 	_sign(Vector3(22, 0, -24), "달리다 앉기 = 슬라이딩")
+	# 매달리기 연습용 높은 상자(3.6m: 뛰어서 올라타기로는 못 오르고 매달려야 한다)
+	_box(Vector3(34, 1.8, -34), Vector3(3, 3.6, 3), block)
+	_sign(Vector3(34, 0, -31), "높은 턱 = 매달리기 (W 오르기 · A/D 옆걸음 · S 놓기)")
 	# 벽 달리기 연습용 긴 벽
 	_box(Vector3(40, 2.5, -25), Vector3(0.5, 5, 30), wall)
 	_sign(Vector3(38, 0, -8), "벽 옆에서 달리며 점프 = 벽 달리기")
@@ -362,6 +365,60 @@ func _selftest() -> void:
 		errors.append("올라타기 실패: y=%.2f (기대 1.5)" % player.global_position.y)
 	player.teleport(Vector3(0, 0.05, 0), 0.0)
 
+	# 매달리기: 3.6m 턱을 붙잡고, 옆으로 이동하고, 올라간다.
+	player.teleport(Vector3(34, 0.05, -31.9), 0.0)
+	await _frames(10)
+	Input.action_press(&"move_forward")
+	player._jump_buffer = 0.12
+	await get_tree().create_timer(0.27).timeout
+	Input.action_release(&"move_forward")
+	await get_tree().create_timer(0.3).timeout
+	if not player.hanging or absf(player.global_position.y - (3.6 - PlayerController.HANG_DROP)) > 0.1:
+		errors.append("매달리기 실패: 매달림=%s y=%.2f" % [player.hanging, player.global_position.y])
+	var hang_x := player.global_position.x
+	Input.action_press(&"move_right")
+	await get_tree().create_timer(0.5).timeout
+	Input.action_release(&"move_right")
+	if not player.hanging or player.global_position.x - hang_x < 0.5:
+		errors.append("매달린 채 옆걸음 실패: %.2fm" % (player.global_position.x - hang_x))
+	if player.gun.can_fire() and player.try_melee():
+		errors.append("매달린 채로 근접 공격이 됨")
+	Input.action_press(&"move_forward")
+	await get_tree().create_timer(0.9).timeout
+	Input.action_release(&"move_forward")
+	await _frames(10)
+	if absf(player.global_position.y - 3.6) > 0.1 or not player.is_on_floor():
+		errors.append("매달린 뒤 오르기 실패: y=%.2f" % player.global_position.y)
+	# 매달렸다가 놓기.
+	player.teleport(Vector3(34, 0.05, -31.9), 0.0)
+	await _frames(10)
+	Input.action_press(&"move_forward")
+	player._jump_buffer = 0.12
+	await get_tree().create_timer(0.27).timeout
+	Input.action_release(&"move_forward")
+	await _frames(6)
+	if not player.hanging:
+		errors.append("두 번째 매달리기 실패")
+	Input.action_press(&"move_back")
+	await get_tree().create_timer(0.6).timeout
+	Input.action_release(&"move_back")
+	if player.hanging or player.global_position.y > 0.3:
+		errors.append("매달렸다 놓기 실패: y=%.2f" % player.global_position.y)
+
+	# 근접 공격: 사격장 표적에 45 피해, 연달아 휘두를 수는 없다.
+	player.teleport(target.global_position + Vector3(0, 0.05, 1.4), 0.0)
+	await _frames(20)
+	target.reset()
+	player.pitch = 0.0
+	await _frames(2)
+	var swung := player.try_melee()
+	if not swung or not is_equal_approx(target.max_hp - target.hp, CombatRules.MELEE_DAMAGE):
+		errors.append("근접 공격 피해 %.0f (기대 %.0f)" % [target.max_hp - target.hp, CombatRules.MELEE_DAMAGE])
+	if player.try_melee():
+		errors.append("근접 공격을 연달아 휘두를 수 있음")
+	player.teleport(Vector3(0, 0.05, 0), 0.0)
+	await _frames(40)
+
 	# 벽 달리기: 벽 옆에서 달리며 뛰면 보통 점프(약 0.7초)보다 오래 떠 있고, 점프를 또 누르면 벽 반대쪽으로 튄다.
 	player.teleport(Vector3(39.2, 0.05, -11), 0.0)
 	await _frames(10)
@@ -385,7 +442,7 @@ func _selftest() -> void:
 	await _frames(20)
 	player.apply_profile(1)
 	await _frames(20)
-	if player.allow_sprint or player.allow_slide or player.allow_mantle or player.allow_wallrun or player.guns.size() != 3:
+	if player.allow_sprint or player.allow_slide or player.allow_mantle or player.allow_wallrun or player.allow_ledge_grab or player.guns.size() != 3:
 		errors.append("아레나 규칙이 적용되지 않음")
 	player.equip_by_id(&"rifle")
 	await _frames(20)

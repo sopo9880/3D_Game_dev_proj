@@ -7,12 +7,17 @@ signal weapon_switched(gun: Gun)
 signal hit_confirmed(damage: float, head: bool, killed: bool)
 signal shot_fired
 signal profile_changed(profile_name: String)
+signal melee_swung(hit_count: int)
 
 const STAND_HEIGHT := 1.8
 const CROUCH_HEIGHT := 1.1
 const RADIUS := 0.35
 const EYE_OFFSET := 0.14
 const RAY_LENGTH := 300.0
+const HANG_DROP := 1.75             ## 매달렸을 때 턱에서 발까지
+const HANG_SHIMMY_SPEED := 1.6
+const MELEE_REACH := 1.5            ## 눈에서 타격 중심까지
+const MELEE_RADIUS := 1.0
 
 ## 조정 패널에 노출할 값: [속성, 최소, 최대, 단계, 표시 이름]
 const TUNABLES: Array[Array] = [
@@ -29,6 +34,7 @@ const TUNABLES: Array[Array] = [
 	["slide_friction", 1, 20, 0.5, "슬라이딩 감속"],
 	["mantle_max_height", 0.5, 3.0, 0.05, "올라타기 최대 높이"],
 	["mantle_speed", 0.5, 2.5, 0.05, "올라타기 빠르기"],
+	["grab_max_height", 1.5, 3.5, 0.05, "매달리기 최대 높이"],
 	["wallrun_time", 0.3, 3.0, 0.05, "벽 달리기 시간 (초)"],
 	["wallrun_sink", 0.0, 8.0, 0.1, "벽 달리기 중 하강 속도"],
 	["wallkick_push", 2.0, 12.0, 0.1, "벽 차기 밀어내는 힘"],
@@ -47,6 +53,7 @@ var slide_speed: float = 10.0
 var slide_friction: float = 7.0
 var mantle_max_height: float = 2.1   ## 발 기준. 이보다 높은 턱은 올라타지 못한다
 var mantle_speed: float = 1.0
+var grab_max_height: float = 2.7      ## 발 기준. 손이 닿는 턱에 매달릴 수 있는 최대 높이
 var wallrun_time: float = 1.2
 var wallrun_sink: float = 1.5
 var wallkick_push: float = 6.0
@@ -56,6 +63,7 @@ var allow_sprint: bool = true
 var allow_slide: bool = true
 var allow_mantle: bool = true      ## 공중에서 앞으로 밀면 턱을 잡고 올라탄다
 var allow_wallrun: bool = true     ## 벽 달리기와 벽 차기
+var allow_ledge_grab: bool = true  ## 턱에 매달리기
 var shift_walks: bool = false      ## true면 Shift가 달리기 대신 조용히 걷기(절반 속도)
 var profiles: Array = []
 var profile_index: int = -1
@@ -70,6 +78,7 @@ var ads_amount: float = 0.0
 var sliding: bool = false
 var mantling: bool = false
 var wallrunning: bool = false
+var hanging: bool = false          ## 턱에 매달려 있다
 var use_world_ammo: bool = false    ## 켜면 재장전이 월드 소지품의 탄약을 쓴다(사격장에서는 끈다)
 var suppress_combat: bool = false  ## 건축 모드 등: 사격과 무기 교체를 막는다
 var downed: bool = false           ## 쓰러짐: 움직이거나 쏠 수 없다(전투 시스템이 켜고 끈다)
@@ -110,6 +119,11 @@ var _empty_clicked: bool = false
 var _ammo_asks: Array = []          ## 탄약 요청 대기열: [무기, 수량]
 var _mantle_t: float = 0.0
 var _wall_normal: Vector3 = Vector3.ZERO
+var _hang_normal: Vector3 = Vector3.ZERO   ## 매달린 벽의 법선(벽에서 나를 향한다)
+var _hang_ledge_y: float = 0.0
+var _hang_time: float = 0.0
+var _grab_cooldown: float = 0.0
+var _melee_cooldown: float = 0.0
 var _wall_time: float = 0.0
 var _wall_cooldown: float = 0.0
 var _kick_normal: Vector3 = Vector3.ZERO   ## 마지막으로 찬 벽. 같은 벽을 연달아 찰 수 없다
@@ -120,9 +134,9 @@ var _base_values: Dictionary[String, Variant] = {}
 
 ## 프로필이 덮어쓸 수 있는 값. 감도와 시야각은 개인 설정이라 프로필이 건드리지 않는다.
 const PROFILE_KEYS: Array[String] = [
-	"allow_sprint", "allow_slide", "allow_mantle", "allow_wallrun", "shift_walks",
+	"allow_sprint", "allow_slide", "allow_mantle", "allow_wallrun", "allow_ledge_grab", "shift_walks",
 	"walk_speed", "sprint_speed", "crouch_speed", "ground_accel", "air_accel",
-	"jump_velocity", "gravity", "slide_speed", "slide_friction", "mantle_max_height", "mantle_speed",
+	"jump_velocity", "gravity", "slide_speed", "slide_friction", "mantle_max_height", "mantle_speed", "grab_max_height",
 	"wallrun_time", "wallrun_sink", "wallkick_push",
 ]
 
@@ -238,6 +252,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_fire_buffer = 0.12
 	elif event.is_action_pressed(&"jump"):
 		_jump_buffer = 0.12
+	elif event.is_action_pressed(&"melee"):
+		try_melee()
 	elif event.is_action_pressed(&"reload"):
 		_empty_clicked = false
 		try_reload()
@@ -309,7 +325,15 @@ func _physics_process(delta: float) -> void:
 	if mantling:
 		_mantle_step(delta)
 		return
+	_grab_cooldown = maxf(_grab_cooldown - delta, 0.0)
+	if hanging:
+		_hang_step(delta, input, active)
+		return
 	if allow_mantle and active and not on_floor and not sliding and input.y < 0.0 and velocity.y > -9.0 and _try_mantle():
+		return
+	# 올라타기에는 높지만 손이 닿는 턱, 또는 떨어지다 스치는 턱은 붙잡는다.
+	if allow_ledge_grab and active and not on_floor and not sliding and _grab_cooldown <= 0.0 \
+			and velocity.y < 5.5 and velocity.y > -14.0 and _try_grab(input.y < 0.0):
 		return
 
 	_wall_cooldown = maxf(_wall_cooldown - delta, 0.0)
@@ -463,6 +487,96 @@ func _wall_kick(normal: Vector3) -> void:
 	sfx.play(&"jump", 0.08)
 
 
+## 앞쪽 턱을 찾는다. {"ledge": 윗면의 점, "normal": 벽 법선}. 없으면 빈 사전.
+## from은 몸의 기준점(발), max_rise는 발에서 턱까지 허용하는 최대 높이.
+func _find_ledge(from: Vector3, forward: Vector3, min_rise: float, max_rise: float) -> Dictionary:
+	var space := get_world_3d().direct_space_state
+	var probe := from + forward * (RADIUS + 0.35)
+	var down := PhysicsRayQueryParameters3D.create(probe + Vector3(0, max_rise + 0.15, 0), probe + Vector3(0, min_rise, 0), 1)
+	down.exclude = [get_rid()]
+	var top := space.intersect_ray(down)
+	if top.is_empty() or (top["normal"] as Vector3).y < 0.7:
+		return {}
+	var ledge: Vector3 = top["position"]
+	# 턱 위에 앉은 키만큼 공간이 있어야 한다.
+	var up := PhysicsRayQueryParameters3D.create(ledge + Vector3(0, 0.05, 0), ledge + Vector3(0, CROUCH_HEIGHT, 0), 1)
+	up.exclude = [get_rid()]
+	if not space.intersect_ray(up).is_empty():
+		return {}
+	# 턱 바로 아래 높이에서 벽면을 찾아 법선을 얻는다(얇은 발판도 잡을 수 있게).
+	var at := Vector3(from.x, ledge.y - 0.08, from.z)
+	var face := PhysicsRayQueryParameters3D.create(at, at + forward * (RADIUS + 0.9), 1)
+	face.exclude = [get_rid()]
+	var wall := space.intersect_ray(face)
+	if wall.is_empty() or absf((wall["normal"] as Vector3).y) > 0.3:
+		return {}
+	var n: Vector3 = wall["normal"]
+	n.y = 0.0
+	return {"ledge": ledge, "normal": n.normalized(), "face": wall["position"]}
+
+
+## 손이 닿는 턱을 붙잡는다.
+func _try_grab(holding_forward: bool) -> bool:
+	var forward := -Basis(Vector3.UP, yaw).z
+	var found := _find_ledge(global_position, forward, 1.2, grab_max_height)
+	if found.is_empty():
+		return false
+	var n: Vector3 = found["normal"]
+	# 앞으로 밀고 있거나, 벽을 바라본 채 떨어지는 중일 때만 붙잡는다.
+	if not holding_forward and velocity.y > -0.5:
+		return false
+	var ledge: Vector3 = found["ledge"]
+	var face: Vector3 = found["face"]
+	hanging = true
+	wallrunning = false
+	_hang_normal = n
+	_hang_ledge_y = ledge.y
+	_hang_time = 0.0
+	velocity = Vector3.ZERO
+	global_position = Vector3(face.x, ledge.y - HANG_DROP, face.z) + n * (RADIUS + 0.04)
+	sfx.play(&"land", 0.1)
+	return true
+
+
+## 매달린 상태: 앞·점프로 올라가고, 뒤·앉기로 놓고, 좌우로 옆걸음, 벽을 등지고 점프하면 차고 나간다.
+func _hang_step(delta: float, input: Vector2, active: bool) -> void:
+	_hang_time += delta
+	velocity = Vector3.ZERO
+	viewmodel.dip(0.9)
+	var facing := -Basis(Vector3.UP, yaw).z
+	if not active or input.y > 0.0 or Input.is_action_pressed(&"crouch"):
+		hanging = false
+		_grab_cooldown = 0.45
+		return
+	if _jump_buffer > 0.0 and facing.dot(_hang_normal) > 0.3:
+		# 벽을 등지고 점프: 차고 나간다.
+		hanging = false
+		_grab_cooldown = 0.3
+		_wall_kick(_hang_normal)
+		return
+	if _jump_buffer > 0.0 or (input.y < 0.0 and _hang_time > 0.25):
+		_jump_buffer = 0.0
+		hanging = false
+		mantling = true
+		_mantle_t = 0.0
+		var rise := _hang_ledge_y - global_position.y
+		_mantle_time = (0.2 + rise * 0.14) / maxf(mantle_speed, 0.1)
+		_mantle_from = global_position
+		_mantle_to = Vector3(global_position.x, _hang_ledge_y + 0.02, global_position.z) - _hang_normal * (RADIUS + 0.3)
+		sfx.play(&"jump", 0.05)
+		return
+	if absf(input.x) > 0.1:
+		# 옆걸음: 옮겨 갈 자리에도 턱이 이어져 있어야 한다.
+		var right := (-_hang_normal).cross(Vector3.UP)
+		var next := global_position + right * input.x * HANG_SHIMMY_SPEED * delta
+		var found := _find_ledge(next, -_hang_normal, HANG_DROP - 0.3, HANG_DROP + 0.3)
+		if not found.is_empty():
+			var ledge: Vector3 = found["ledge"]
+			var face: Vector3 = found["face"]
+			_hang_ledge_y = ledge.y
+			global_position = Vector3(face.x, ledge.y - HANG_DROP, face.z) + _hang_normal * (RADIUS + 0.04)
+
+
 ## 앞에 올라탈 수 있는 턱이 있으면 올라타기를 시작한다.
 func _try_mantle() -> bool:
 	var forward := -Basis(Vector3.UP, yaw).z
@@ -542,7 +656,8 @@ func _process(delta: float) -> void:
 	var want_ads := active and not suppress_combat and Input.is_action_pressed(&"aim") and not gun.is_reloading() and _switch_lock <= 0.0
 	ads_amount = move_toward(ads_amount, 1.0 if want_ads else 0.0, delta / maxf(gun.def.ads_time, 0.01))
 
-	if active and _switch_lock <= 0.0 and not suppress_combat:
+	_melee_cooldown = maxf(_melee_cooldown - delta, 0.0)
+	if active and _switch_lock <= 0.0 and not suppress_combat and not hanging and not mantling:
 		var want_fire := Input.is_action_pressed(&"fire") if gun.def.auto else _fire_buffer > 0.0
 		if want_fire:
 			var guard := 0
@@ -656,6 +771,53 @@ func _shoot() -> void:
 		stat_heads += 1
 	sfx.play(&"kill" if any_kill else (&"head" if any_head else &"hit"), 0.03)
 	hit_confirmed.emit(total, any_head, any_kill)
+
+
+## 근접 공격: 총으로 후려친다. 탄약이 들지 않고, 맞은 적은 잠깐 움찔한다. 휘둘렀으면 true.
+func try_melee() -> bool:
+	if _melee_cooldown > 0.0 or hanging or mantling or downed or suppress_combat:
+		return false
+	_melee_cooldown = CombatRules.MELEE_INTERVAL
+	_switch_lock = maxf(_switch_lock, 0.25)   # 휘두르는 동안은 쏘지 못한다
+	gun.reload_left = 0.0
+	viewmodel.melee()
+	sfx.play(&"slide", 0.2)
+	_shake = minf(_shake + 0.4, 2.0)
+	var forward := -camera.global_basis.z
+	var shape := SphereShape3D.new()
+	shape.radius = MELEE_RADIUS
+	var q := PhysicsShapeQueryParameters3D.new()
+	q.shape = shape
+	q.transform = Transform3D(Basis.IDENTITY, camera.global_position + forward * MELEE_REACH)
+	q.collision_mask = 3
+	q.exclude = [get_rid()]
+	var hits := 0
+	var enemy_ids := PackedInt32Array()
+	var seen: Dictionary[Object, bool] = {}
+	for r: Dictionary in get_world_3d().direct_space_state.intersect_shape(q, 8):
+		var collider: Object = r["collider"]
+		if seen.has(collider) or not collider.has_method(&"take_hit"):
+			continue
+		seen[collider] = true
+		hits += 1
+		var pos := (collider as Node3D).global_position + Vector3(0, 1.0, 0)
+		fx.impact(pos, -forward, true)
+		if collider is Enemy:
+			enemy_ids.append((collider as Enemy).net_id)
+			(collider as Enemy).flash()
+		else:
+			# 사격장 표적처럼 호스트 판정이 없는 대상은 바로 피해를 준다.
+			var killed: bool = collider.call(&"take_hit", CombatRules.MELEE_DAMAGE, false, pos)
+			fx.damage_number(pos, CombatRules.MELEE_DAMAGE, false, killed)
+			hit_confirmed.emit(CombatRules.MELEE_DAMAGE, false, killed)
+	if not enemy_ids.is_empty():
+		Combat.report_melee(enemy_ids)
+		hit_confirmed.emit(CombatRules.MELEE_DAMAGE, false, false)
+	if hits > 0:
+		sfx.play(&"land", 0.1)
+		stat_hits += 1
+	melee_swung.emit(hits)
+	return true
 
 
 func reset_stats() -> void:

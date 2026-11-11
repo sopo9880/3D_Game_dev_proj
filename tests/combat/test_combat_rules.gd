@@ -37,6 +37,15 @@ func test_shot_validation() -> void:
 	eq(CombatRules.check_shot(rifle, 0, 1.0), "too_many_pellets", "빈 보고")
 
 
+func test_melee_validation() -> void:
+	eq(CombatRules.check_melee(1, 1.0), "", "정상")
+	eq(CombatRules.check_melee(3, 1.0), "", "세 명까지")
+	eq(CombatRules.check_melee(4, 1.0), "too_many_targets", "대상이 너무 많음")
+	eq(CombatRules.check_melee(0, 1.0), "too_many_targets", "빈 보고")
+	eq(CombatRules.check_melee(1, 0.1), "too_fast", "너무 빠름")
+	check(CombatRules.MELEE_DAMAGE * 2.0 >= 60.0, "돌진형은 두 번에 쓰러진다")
+
+
 func test_grenade_damage_falls_off_to_zero() -> void:
 	eq(CombatRules.grenade_damage(0.0), CombatRules.GRENADE_DAMAGE, "중심")
 	eq(CombatRules.grenade_damage(CombatRules.GRENADE_RADIUS), 0.0, "가장자리")

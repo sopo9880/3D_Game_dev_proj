@@ -5,7 +5,7 @@ extends RefCounted
 const KEYS: Dictionary[StringName, Array] = {
 	&"move_forward": [KEY_W], &"move_back": [KEY_S], &"move_left": [KEY_A], &"move_right": [KEY_D],
 	&"jump": [KEY_SPACE], &"sprint": [KEY_SHIFT], &"crouch": [KEY_CTRL, KEY_C],
-	&"reload": [KEY_R],
+	&"reload": [KEY_R], &"melee": [KEY_V],
 	&"weapon_1": [KEY_1], &"weapon_2": [KEY_2], &"weapon_3": [KEY_3],
 	&"toggle_tuning": [KEY_F1], &"toggle_profile": [KEY_F2], &"toggle_help": [KEY_H], &"reset_stats": [KEY_F5],
 	&"start_challenge": [KEY_T], &"sens_down": [KEY_BRACKETLEFT], &"sens_up": [KEY_BRACKETRIGHT],
