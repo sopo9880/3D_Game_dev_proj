@@ -10,6 +10,7 @@ const KEYS: Dictionary[StringName, Array] = {
 	&"toggle_tuning": [KEY_F1], &"toggle_profile": [KEY_F2], &"toggle_help": [KEY_H], &"reset_stats": [KEY_F5],
 	&"start_challenge": [KEY_T], &"sens_down": [KEY_BRACKETLEFT], &"sens_up": [KEY_BRACKETRIGHT],
 	&"toggle_fullscreen": [KEY_F11], &"pause": [KEY_ESCAPE],
+	&"dev_build_box": [KEY_B], &"dev_build_line": [KEY_N], &"dev_remove": [KEY_X],
 }
 const MOUSE: Dictionary[StringName, int] = {
 	&"fire": MOUSE_BUTTON_LEFT, &"aim": MOUSE_BUTTON_RIGHT,

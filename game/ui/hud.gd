@@ -4,6 +4,7 @@ extends Control
 
 var player: PlayerController
 var message: String = ""          ## 화면 위쪽 안내(도전 모드 등)
+var help_lines: Array = []        ## 비어 있으면 사격장용 기본 도움말
 
 var _hit_time: float = 0.0
 var _hit_color: Color = Color.WHITE
@@ -26,13 +27,15 @@ func _ready() -> void:
 	_version = _label(Control.PRESET_TOP_RIGHT, 14, HORIZONTAL_ALIGNMENT_RIGHT)
 	_top.offset_top = 48.0
 	_top.offset_bottom = 48.0
-	_version.text = "Edenfall 사격 감각 테스트  v%s" % ProjectSettings.get_setting("application/config/version", "?")
+	_version.text = "Edenfall  v%s" % ProjectSettings.get_setting("application/config/version", "?")
 	_version.modulate.a = 0.7
 	_help.text = "\n".join([
-		"WASD 이동 · Shift 달리기 · Space 점프 · Ctrl/C 앉기 (달리다 앉으면 슬라이딩)",
+		"WASD 이동 · Shift 달리기 · Space 점프 (턱 앞에서 앞으로 밀면 올라타기) · Ctrl/C 앉기 (달리다 앉으면 슬라이딩)",
 		"좌클릭 사격 · 우클릭 조준 · R 재장전 · 1/2/3 또는 휠 무기 교체",
 		"F2 규칙 전환 (협동 ↔ 전술 아레나) · F1 수치 조정 · [ ] 감도 · T 표적 도전 · F5 통계 초기화 · F11 전체 화면 · H 도움말 · Esc 일시정지",
 	])
+	if not help_lines.is_empty():
+		_help.text = "\n".join(help_lines)
 	_paused.text = "화면을 클릭하면 시작합니다"
 
 

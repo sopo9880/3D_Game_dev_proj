@@ -664,6 +664,14 @@ func to_dict() -> Dictionary:
 	}
 
 
+## 상태 전체의 해시. 호스트와 클라이언트의 시뮬레이션이 어긋났는지 비교하는 데 쓴다.
+func state_hash() -> String:
+	var ctx := HashingContext.new()
+	ctx.start(HashingContext.HASH_SHA1)
+	ctx.update(var_to_bytes(to_dict()))
+	return ctx.finish().hex_encode()
+
+
 ## 저장된 상태에서 월드를 만든다. 형식이 맞지 않으면 null.
 static func from_dict(content: ContentDB, d: Dictionary) -> SimWorld:
 	if int(d.get("format", -1)) != SAVE_FORMAT:

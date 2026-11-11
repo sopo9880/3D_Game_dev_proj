@@ -347,11 +347,23 @@ func _selftest() -> void:
 	if player.global_position.y - y0 < 0.5:
 		errors.append("점프 높이 %.2fm" % (player.global_position.y - y0))
 
+	# 올라타기: 점프(1.2m)로는 못 오르는 1.5m 상자를 앞으로 밀면서 뛰면 올라간다.
+	player.teleport(Vector3(28, 0.05, -7), 0.0)
+	await _frames(10)
+	Input.action_press(&"move_forward")
+	player._jump_buffer = 0.12
+	await get_tree().create_timer(0.9).timeout
+	Input.action_release(&"move_forward")
+	await _frames(10)
+	if absf(player.global_position.y - 1.5) > 0.1 or not player.is_on_floor():
+		errors.append("올라타기 실패: y=%.2f (기대 1.5)" % player.global_position.y)
+	player.teleport(Vector3(0, 0.05, 0), 0.0)
+
 	# 전술 아레나 규칙: 달리기와 슬라이딩이 없고, 움직이면 탄이 크게 퍼지며, 소총 머리 한 발에 쓰러진다.
 	await _frames(20)
 	player.apply_profile(1)
 	await _frames(20)
-	if player.allow_sprint or player.allow_slide or player.guns.size() != 3:
+	if player.allow_sprint or player.allow_slide or player.allow_mantle or player.guns.size() != 3:
 		errors.append("아레나 규칙이 적용되지 않음")
 	player.equip_by_id(&"rifle")
 	await _frames(20)

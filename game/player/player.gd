@@ -27,6 +27,8 @@ const TUNABLES: Array[Array] = [
 	["gravity", 8, 40, 0.5, "중력"],
 	["slide_speed", 6, 18, 0.1, "슬라이딩 초속"],
 	["slide_friction", 1, 20, 0.5, "슬라이딩 감속"],
+	["mantle_max_height", 0.5, 3.0, 0.05, "올라타기 최대 높이"],
+	["mantle_speed", 0.5, 2.5, 0.05, "올라타기 빠르기"],
 ]
 
 var sens_mult: float = 1.0
@@ -40,10 +42,13 @@ var jump_velocity: float = 7.0
 var gravity: float = 20.0
 var slide_speed: float = 10.0
 var slide_friction: float = 7.0
+var mantle_max_height: float = 2.1   ## 발 기준. 이보다 높은 턱은 올라타지 못한다
+var mantle_speed: float = 1.0
 
 ## 규칙 묶음(프로필)이 켜고 끄는 값. 협동과 아레나가 같은 컨트롤러를 다른 규칙으로 쓴다.
 var allow_sprint: bool = true
 var allow_slide: bool = true
+var allow_mantle: bool = true      ## 공중에서 앞으로 밀면 턱을 잡고 올라탄다
 var shift_walks: bool = false      ## true면 Shift가 달리기 대신 조용히 걷기(절반 속도)
 var profiles: Array = []
 var profile_index: int = -1
@@ -56,6 +61,7 @@ var guns: Array[Gun] = []
 var gun: Gun
 var ads_amount: float = 0.0
 var sliding: bool = false
+var mantling: bool = false
 var crouching: bool = false
 
 # 통계 (사격장 표시용)
@@ -90,13 +96,17 @@ var _fov_smooth: float = 90.0
 var _roll: float = 0.0
 var _switch_lock: float = 0.0
 var _empty_clicked: bool = false
+var _mantle_t: float = 0.0
+var _mantle_time: float = 0.3
+var _mantle_from: Vector3 = Vector3.ZERO
+var _mantle_to: Vector3 = Vector3.ZERO
 var _base_values: Dictionary[String, Variant] = {}
 
 ## 프로필이 덮어쓸 수 있는 값. 감도와 시야각은 개인 설정이라 프로필이 건드리지 않는다.
 const PROFILE_KEYS: Array[String] = [
-	"allow_sprint", "allow_slide", "shift_walks",
+	"allow_sprint", "allow_slide", "allow_mantle", "shift_walks",
 	"walk_speed", "sprint_speed", "crouch_speed", "ground_accel", "air_accel",
-	"jump_velocity", "gravity", "slide_speed", "slide_friction",
+	"jump_velocity", "gravity", "slide_speed", "slide_friction", "mantle_max_height", "mantle_speed",
 ]
 
 
@@ -244,6 +254,12 @@ func _physics_process(delta: float) -> void:
 	var want_sprint := allow_sprint and shift and input.y < 0.0 and not want_crouch \
 			and ads_amount < 0.3 and not (gun.def.auto and Input.is_action_pressed(&"fire"))
 
+	if mantling:
+		_mantle_step(delta)
+		return
+	if allow_mantle and active and not on_floor and not sliding and input.y < 0.0 and velocity.y > -9.0 and _try_mantle():
+		return
+
 	_coyote = 0.1 if on_floor else maxf(_coyote - delta, 0.0)
 	_jump_buffer = maxf(_jump_buffer - delta, 0.0)
 	_slide_cooldown = maxf(_slide_cooldown - delta, 0.0)
@@ -313,6 +329,63 @@ func _physics_process(delta: float) -> void:
 			sfx.play(&"land", 0.08)
 		_fall_speed = 0.0
 	_was_on_floor = is_on_floor()
+
+
+## 앞에 올라탈 수 있는 턱이 있으면 올라타기를 시작한다.
+func _try_mantle() -> bool:
+	var forward := -Basis(Vector3.UP, yaw).z
+	var space := get_world_3d().direct_space_state
+	var probe := global_position + forward * (RADIUS + 0.35)
+	# 턱 윗면 찾기: 앞쪽 위에서 아래로 내려 본다.
+	var q := PhysicsRayQueryParameters3D.create(
+		probe + Vector3(0, mantle_max_height + 0.15, 0), probe + Vector3(0, 0.3, 0))
+	q.exclude = [get_rid()]
+	var hit := space.intersect_ray(q)
+	if hit.is_empty() or (hit["normal"] as Vector3).y < 0.7:
+		return false
+	var ledge: Vector3 = hit["position"]
+	var rise := ledge.y - global_position.y
+	if rise < 0.3 or rise > mantle_max_height:
+		return false
+	# 턱 위에 앉은 키만큼 공간이 있어야 한다.
+	var up := PhysicsRayQueryParameters3D.create(ledge + Vector3(0, 0.05, 0), ledge + Vector3(0, CROUCH_HEIGHT, 0))
+	up.exclude = [get_rid()]
+	if not space.intersect_ray(up).is_empty():
+		return false
+	# 몸 앞이 뚫려 있으면(턱이 아니라 떠 있는 발판 아래) 올라타지 않는다. 머리 위가 막혀 있어도 안 된다.
+	var head := PhysicsRayQueryParameters3D.create(
+		global_position + Vector3(0, _height, 0), Vector3(global_position.x, ledge.y + 0.3, global_position.z))
+	head.exclude = [get_rid()]
+	if ledge.y + 0.3 > global_position.y + _height and not space.intersect_ray(head).is_empty():
+		return false
+	mantling = true
+	sliding = false
+	_mantle_t = 0.0
+	_mantle_time = (0.2 + rise * 0.14) / maxf(mantle_speed, 0.1)
+	_mantle_from = global_position
+	_mantle_to = ledge + forward * 0.2 + Vector3(0, 0.02, 0)
+	velocity = Vector3.ZERO
+	viewmodel.dip(0.7)
+	sfx.play(&"jump", 0.05)
+	return true
+
+
+func _mantle_step(delta: float) -> void:
+	_mantle_t = minf(_mantle_t + delta / _mantle_time, 1.0)
+	# 먼저 위로, 그다음 앞으로.
+	var up_t := ease(clampf(_mantle_t / 0.7, 0.0, 1.0), 0.6)
+	var fwd_t := smoothstep(0.45, 1.0, _mantle_t)
+	global_position = Vector3(
+		lerpf(_mantle_from.x, _mantle_to.x, fwd_t),
+		lerpf(_mantle_from.y, _mantle_to.y, up_t),
+		lerpf(_mantle_from.z, _mantle_to.z, fwd_t))
+	if _mantle_t >= 1.0:
+		mantling = false
+		var forward := (_mantle_to - _mantle_from)
+		forward.y = 0.0
+		velocity = forward.normalized() * walk_speed * 0.6
+		_was_on_floor = true
+		_fall_speed = 0.0
 
 
 func _can_stand() -> bool:

@@ -98,6 +98,11 @@ func kick(def: WeaponDef, ads: bool) -> void:
 	_flash_light.light_energy = 2.5
 
 
+## 총을 잠깐 내린다(올라타기 등 손을 쓰는 동작).
+func dip(amount: float) -> void:
+	_switch_drop = maxf(_switch_drop, amount)
+
+
 func add_sway(mouse_delta: Vector2) -> void:
 	_sway += mouse_delta * 0.00035
 

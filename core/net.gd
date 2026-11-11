@@ -1,0 +1,161 @@
+extends Node
+## 오토로드. 접속(호스트/참가/싱글)과 플레이어 목록, 역할을 관리한다.
+## 전송 종류(ENet, 나중에 Steam)를 아는 것은 이 파일뿐이다.
+
+signal connected                      ## 월드에 들어갔다(호스트 시작, 싱글 시작, 참가 후 스냅샷 적용 완료)
+signal disconnected(reason: String)
+signal players_changed
+
+const DEFAULT_PORT := 24565
+const MAX_PLAYERS := 8
+
+enum Role { OWNER, BUILDER, VISITOR }
+
+## 피어 ID → {"name": String, "role": Role}. 모든 피어가 같은 내용을 갖는다.
+var players: Dictionary = {}
+var local_name: String = "Player"
+var default_role: Role = Role.BUILDER
+## 이름 → 역할. 역할이 세이브에 저장되기 전까지 쓰는 임시 지정 수단(테스트 포함).
+var role_overrides: Dictionary[String, int] = {}
+var in_world: bool = false
+
+
+func _ready() -> void:
+	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
+	multiplayer.connected_to_server.connect(_on_connected_to_server)
+	multiplayer.connection_failed.connect(func() -> void: _leave("connection_failed"))
+	multiplayer.server_disconnected.connect(func() -> void: _leave("host_closed"))
+
+
+func version() -> String:
+	return str(ProjectSettings.get_setting("application/config/version", "0.0.0.0"))
+
+
+func my_id() -> int:
+	return multiplayer.get_unique_id()
+
+
+func is_host() -> bool:
+	return multiplayer.is_server()
+
+
+func role_of(peer_id: int) -> Role:
+	var p: Dictionary = players.get(peer_id, {})
+	return p.get("role", Role.VISITOR)
+
+
+func may_build(peer_id: int) -> bool:
+	return role_of(peer_id) != Role.VISITOR
+
+
+## 혼자 플레이. 소켓을 열지 않으므로 네트워크 없이도 된다. 코드 경로는 호스트와 같다.
+func start_single() -> void:
+	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
+	_begin_hosting()
+
+
+func host(port: int = DEFAULT_PORT) -> Error:
+	var peer := ENetMultiplayerPeer.new()
+	var err := peer.create_server(port, MAX_PLAYERS - 1)
+	if err != OK:
+		return err
+	multiplayer.multiplayer_peer = peer
+	_begin_hosting()
+	return OK
+
+
+func join(address: String, port: int = DEFAULT_PORT) -> Error:
+	var peer := ENetMultiplayerPeer.new()
+	var err := peer.create_client(address, port)
+	if err != OK:
+		return err
+	players.clear()
+	multiplayer.multiplayer_peer = peer
+	return OK
+
+
+func leave() -> void:
+	_leave("left")
+
+
+func _begin_hosting() -> void:
+	players = {1: {"name": local_name, "role": Role.OWNER}}
+	in_world = true
+	World.start_new()
+	players_changed.emit()
+	connected.emit()
+
+
+func _leave(reason: String) -> void:
+	var was_active := in_world or multiplayer.multiplayer_peer is ENetMultiplayerPeer
+	in_world = false
+	World.stop()
+	if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+		multiplayer.multiplayer_peer.close()
+	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
+	players.clear()
+	if was_active:
+		disconnected.emit(reason)
+
+
+# --- 접속 절차: 클라이언트가 버전과 콘텐츠 해시를 보내고, 호스트가 확인한 뒤 월드 스냅샷을 준다. ---
+
+func _on_connected_to_server() -> void:
+	_hello.rpc_id(1, version(), Registry.db.content_hash(), local_name)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _hello(their_version: String, their_hash: String, their_name: String) -> void:
+	if not multiplayer.is_server():
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if players.has(sender):
+		return
+	var reason := ""
+	if their_version != version():
+		reason = "version_mismatch:%s" % version()
+	elif their_hash != Registry.db.content_hash():
+		reason = "content_mismatch"
+	elif players.size() >= MAX_PLAYERS:
+		reason = "full"
+	if reason != "":
+		_rejected.rpc_id(sender, reason)
+		# 거절 사유가 도착할 시간을 준 뒤 끊는다.
+		get_tree().create_timer(0.5).timeout.connect(func() -> void:
+			if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+				(multiplayer.multiplayer_peer as ENetMultiplayerPeer).disconnect_peer(sender))
+		return
+	var clean_name := their_name.strip_edges().left(24)
+	if clean_name == "":
+		clean_name = "Player %d" % players.size()
+	players[sender] = {"name": clean_name, "role": role_overrides.get(clean_name, default_role)}
+	World.send_snapshot(sender)
+	_players.rpc(players)
+	players_changed.emit()
+
+
+@rpc("authority", "call_remote", "reliable")
+func _rejected(reason: String) -> void:
+	_leave("rejected:" + reason)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _players(list: Dictionary) -> void:
+	players = list
+	players_changed.emit()
+
+
+## World가 스냅샷 적용을 마치면 부른다(클라이언트).
+func notify_snapshot_applied() -> void:
+	if not in_world:
+		in_world = true
+		connected.emit()
+
+
+func _on_peer_disconnected(peer_id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	World.forget_peer(peer_id)
+	if players.erase(peer_id):
+		_players.rpc(players)
+		players_changed.emit()
