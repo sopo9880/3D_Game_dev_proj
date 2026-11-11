@@ -1,0 +1,5 @@
+{
+  "starting_kit": [["iron_ingot", 40], ["glowleaf_seed", 4], ["rifle_ammo", 150], ["shell", 30]],
+  "max_build_height": 48,
+  "max_decor": 2000
+}

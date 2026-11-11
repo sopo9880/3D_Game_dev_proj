@@ -2,6 +2,7 @@ extends Control
 ## 시작 화면. 실행 인자가 있으면 메뉴를 건너뛴다.
 ##   -- --single                 혼자 샌드박스
 ##   -- --host [--port=N]        호스트
+##   --world=ID                  저장된 월드 이어 하기(없으면 새 월드)   --saveroot=경로  세이브 폴더
 ##   -- --join=주소 [--port=N]   참가
 ##   -- --range / --selftest / --screenshot=경로   사격장
 ##   --name=이름
@@ -12,6 +13,8 @@ const SANDBOX_SCENE := "res://game/world/sandbox.tscn"
 var _status: Label
 var _address: LineEdit
 var _name: LineEdit
+var _worlds: OptionButton
+var _world_ids: Array[String] = []
 
 
 func _ready() -> void:
@@ -21,9 +24,16 @@ func _ready() -> void:
 	var port := Net.DEFAULT_PORT
 	var mode := ""
 	var address := ""
+	var world_id := ""
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--port="):
 			port = int(arg.trim_prefix("--port="))
+		elif arg.begins_with("--world="):
+			world_id = arg.trim_prefix("--world=")
+		elif arg.begins_with("--saveroot="):
+			Save.set_root(arg.trim_prefix("--saveroot="))
+		elif arg == "--savetest=read":
+			World.tick_enabled = false   # 불러온 직후의 상태를 그대로 비교한다
 		elif arg.begins_with("--name="):
 			Net.local_name = arg.trim_prefix("--name=")
 		elif arg.begins_with("--join="):
@@ -36,8 +46,8 @@ func _ready() -> void:
 	_build_menu()
 	match mode:
 		"range": get_tree().change_scene_to_file.call_deferred(RANGE_SCENE)
-		"single": Net.start_single.call_deferred()
-		"host": _host.call_deferred(port)
+		"single": Net.start_single.call_deferred(world_id)
+		"host": _host.call_deferred(port, world_id)
 		"join": _join.call_deferred(address, port)
 
 
@@ -67,12 +77,21 @@ func _build_menu() -> void:
 	_name.placeholder_text = "이름"
 	_name.text = Net.local_name
 	box.add_child(_name)
+	_worlds = OptionButton.new()
+	_worlds.add_item("새 월드")
+	for m in Save.store.list_worlds():
+		var when := Time.get_datetime_string_from_unix_time(int(m["saved_at"]), true)
+		_worlds.add_item("%s  ·  %s  ·  %d분 플레이" % [m["name"], when, int(m["play_ticks"]) / 600])
+		_world_ids.append(str(m["world_id"]))
+	if _world_ids.size() > 0:
+		_worlds.select(1)   # 가장 최근 월드를 기본으로
+	box.add_child(_worlds)
 	_button(box, "혼자 시작", func() -> void:
 		_take_name()
-		Net.start_single())
+		Net.start_single(_selected_world()))
 	_button(box, "호스트 (친구가 접속할 수 있게 열기)", func() -> void:
 		_take_name()
-		_host(Net.DEFAULT_PORT))
+		_host(Net.DEFAULT_PORT, _selected_world()))
 	_address = LineEdit.new()
 	_address.placeholder_text = "호스트 주소 (예: 192.168.0.10)"
 	_address.text = "127.0.0.1"
@@ -100,8 +119,13 @@ func _take_name() -> void:
 		Net.local_name = _name.text.strip_edges()
 
 
-func _host(port: int) -> void:
-	var err := Net.host(port)
+func _selected_world() -> String:
+	var i := _worlds.selected - 1
+	return _world_ids[i] if i >= 0 and i < _world_ids.size() else ""
+
+
+func _host(port: int, world_id: String = "") -> void:
+	var err := Net.host(port, world_id)
 	if err != OK:
 		_status.text = "호스트를 열 수 없습니다 (포트 %d, 오류 %d)" % [port, err]
 		print("HOST FAILED %d" % err)

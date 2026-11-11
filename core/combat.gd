@@ -8,7 +8,6 @@ extends Node
 signal vitals_changed(peer_id: int)
 signal respawned(pos: Vector3)                           ## 내 캐릭터가 다시 태어났다
 signal enemy_died(id: int, pos: Vector3, killer: int)
-signal inventory_changed(gained: Dictionary)
 signal shot_seen(peer_id: int, weapon_id: StringName, from: Vector3, to: Vector3)
 signal projectile_spawned(id: int, kind: StringName, pos: Vector3, vel: Vector3)
 signal projectile_ended(id: int, pos: Vector3, exploded: bool)
@@ -51,7 +50,6 @@ class SpawnPoint:
 
 
 var vitals: Dictionary[int, Vitals] = {}
-var inventory: Dictionary = {}                 ## 내 소지품: 아이템 ID(문자열) → 수량
 var my_grenades: int = CombatRules.GRENADE_MAX
 var enemies: Dictionary[int, Enemy] = {}
 var enemy_defs: Array[EnemyDef] = []
@@ -75,7 +73,6 @@ var _local_body: RID
 var _next_enemy_id: int = 1
 var _next_projectile_id: int = 1
 var _projectiles: Array[Projectile] = []
-var _inventories: Dictionary[int, Dictionary] = {}
 var _grenades: Dictionary[int, int] = {}
 var _last_shot: Dictionary[int, float] = {}
 var _enemy_timer: float = 0.0
@@ -124,9 +121,7 @@ func unbind_scene() -> void:
 	_spawn_points.clear()
 	_scene = null
 	vitals.clear()
-	_inventories.clear()
 	_grenades.clear()
-	inventory = {}
 
 
 func is_bound() -> bool:
@@ -146,12 +141,10 @@ func _sync_players() -> void:
 	for peer: int in Net.players:
 		if not vitals.has(peer):
 			vitals[peer] = Vitals.new()
-			_inventories[peer] = {}
 			_grenades[peer] = CombatRules.GRENADE_MAX
 	for peer: int in vitals.keys():
 		if not Net.players.has(peer):
 			vitals.erase(peer)
-			_inventories.erase(peer)
 			_grenades.erase(peer)
 			_last_shot.erase(peer)
 
@@ -442,21 +435,8 @@ func _ev_enemy_died(id: int, pos: Vector3, killer: int) -> void:
 
 
 func _grant(peer: int, items: Dictionary) -> void:
-	if items.is_empty() or not _inventories.has(peer):
-		return
-	var inv := _inventories[peer]
-	for id: String in items:
-		inv[id] = int(inv.get(id, 0)) + int(items[id])
-	if peer == 1:
-		_ev_inventory(inv, items)
-	else:
-		_ev_inventory.rpc_id(peer, inv, items)
-
-
-@rpc("authority", "call_remote", "reliable")
-func _ev_inventory(inv: Dictionary, gained: Dictionary) -> void:
-	inventory = inv.duplicate()
-	inventory_changed.emit(gained)
+	# 소지품은 월드 상태의 일부다(저장되고 모든 피어가 같은 값을 갖는다).
+	World.grant(peer, items)
 
 
 # ---------------------------------------------------------------------------

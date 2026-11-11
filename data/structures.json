@@ -1,8 +1,8 @@
 [
-  {"id": "floor",  "tab": "building", "footprint": [4, 1, 4], "cost": [["iron_ingot", 2]]},
-  {"id": "wall",   "tab": "building", "footprint": [4, 4, 1], "cost": [["iron_ingot", 2]]},
-  {"id": "stairs", "tab": "building", "footprint": [4, 4, 4], "cost": [["iron_ingot", 4]]},
-  {"id": "roof",   "tab": "building", "footprint": [4, 1, 4], "cost": [["iron_ingot", 2]]},
+  {"id": "floor",  "tab": "building", "kind": "floor", "footprint": [4, 1, 4], "cost": [["iron_ingot", 2]]},
+  {"id": "wall",   "tab": "building", "kind": "wall", "footprint": [4, 4, 1], "cost": [["iron_ingot", 2]]},
+  {"id": "stairs", "tab": "building", "kind": "stairs", "footprint": [4, 4, 4], "cost": [["iron_ingot", 4]]},
+  {"id": "roof",   "tab": "building", "kind": "floor", "footprint": [4, 1, 4], "cost": [["iron_ingot", 2]]},
 
   {"id": "miner", "tab": "industry", "kind": "crafter", "footprint": [3, 3, 3], "cost": [["iron_ingot", 10]],
    "power_use": 10, "params": {"needs_node": true},
@@ -34,7 +34,12 @@
   {"id": "power_pole", "tab": "industry", "kind": "power_pole", "footprint": [1, 4, 1], "cost": [["iron_ingot", 2]],
    "power_radius": 20},
 
-  {"id": "workbench", "tab": "industry", "footprint": [2, 1, 2], "cost": [["iron_ingot", 4]]},
-  {"id": "plot",      "tab": "nature",   "footprint": [2, 1, 2], "cost": [["iron_ingot", 1]]},
+  {"id": "workbench", "tab": "industry", "kind": "workbench", "footprint": [2, 1, 2], "cost": [["iron_ingot", 4]]},
+  {"id": "plot",      "tab": "nature",   "kind": "plot", "footprint": [2, 1, 2], "cost": [["iron_ingot", 1]]},
+  {"id": "chair",   "tab": "interior", "kind": "decor", "footprint": [1, 1, 1], "cost": [["iron_ingot", 1]], "params": {"size": [0.5, 0.9, 0.5]}},
+  {"id": "table",   "tab": "interior", "kind": "decor", "footprint": [1, 1, 1], "cost": [["iron_ingot", 1]], "params": {"size": [1.4, 0.8, 0.8]}},
+  {"id": "lamp",    "tab": "interior", "kind": "decor", "footprint": [1, 1, 1], "cost": [["iron_ingot", 1]], "params": {"size": [0.25, 1.8, 0.25], "light": true}},
+  {"id": "planter", "tab": "nature",   "kind": "decor", "footprint": [1, 1, 1], "cost": [["iron_ingot", 1]], "params": {"size": [0.6, 0.5, 0.6]}},
+  {"id": "fence",   "tab": "nature",   "kind": "decor", "footprint": [1, 1, 1], "cost": [["iron_ingot", 1]], "params": {"size": [2.0, 1.0, 0.12]}},
   {"id": "beacon",    "tab": "industry", "footprint": [3, 6, 3], "cost": [["energy_core", 1], ["iron_ingot", 30], ["precision_part", 4]]}
 ]

@@ -11,6 +11,7 @@ const KEYS: Dictionary[StringName, Array] = {
 	&"start_challenge": [KEY_T], &"sens_down": [KEY_BRACKETLEFT], &"sens_up": [KEY_BRACKETRIGHT],
 	&"toggle_fullscreen": [KEY_F11], &"pause": [KEY_ESCAPE],
 	&"throw": [KEY_G], &"interact": [KEY_E],
+	&"save_game": [KEY_F6], &"save_and_exit": [KEY_F10],
 	&"dev_build_box": [KEY_B], &"dev_build_line": [KEY_N], &"dev_remove": [KEY_X],
 }
 const MOUSE: Dictionary[StringName, int] = {

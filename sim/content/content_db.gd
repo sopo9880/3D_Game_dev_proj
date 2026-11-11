@@ -7,6 +7,10 @@ var items: Dictionary[StringName, ItemDef] = {}
 var item_ids: Array[StringName] = []  ## 인덱스 → ID
 var recipes: Dictionary[StringName, RecipeDef] = {}
 var structures: Dictionary[StringName, StructureDef] = {}
+var crops: Array[CropDef] = []
+var starting_kit: Dictionary[int, int] = {}   ## 아이템 인덱스 → 수량
+var max_build_height: int = 48
+var max_decor: int = 2000
 var errors: PackedStringArray = []
 
 
@@ -15,6 +19,8 @@ static func load_from_dir(dir: String) -> ContentDB:
 	db._load_items(db._read(dir.path_join("items.json")))
 	db._load_recipes(db._read(dir.path_join("recipes.json")))
 	db._load_structures(db._read(dir.path_join("structures.json")))
+	db._load_crops(db._read(dir.path_join("crops.json")))
+	db._load_rules(dir.path_join("rules.json"))
 	return db
 
 
@@ -42,6 +48,9 @@ func content_hash() -> String:
 	for id: StringName in structures:
 		var s := structures[id]
 		parts.append("%s:%d:%s:%d:%d:%d:%s" % [id, s.kind, s.footprint, s.power_use, s.power_gen, s.power_radius, JSON.stringify(s.params)])
+	for c in crops:
+		parts.append("%s:%d:%d:%d:%d:%d:%d:%d" % [c.id, c.seed_item, c.product_item, c.grow_ticks, c.stages, c.yield_count, c.seed_return, c.bonus_seed_percent])
+	parts.append("kit:%s:%d:%d" % [starting_kit, max_build_height, max_decor])
 	return "\n".join(parts).sha256_text()
 
 
@@ -170,6 +179,56 @@ func _load_structures(rows: Array) -> void:
 				errors.append("레시피 %s: 없는 설비 '%s'" % [rid, m])
 			else:
 				structures[m].recipes.append(r)
+
+
+func crop_by_id(id: StringName) -> CropDef:
+	for c in crops:
+		if c.id == id:
+			return c
+	return null
+
+
+## 씨앗 아이템으로 심을 수 있는 작물. 없으면 null.
+func crop_for_seed(item: int) -> CropDef:
+	for c in crops:
+		if c.seed_item == item:
+			return c
+	return null
+
+
+func _load_crops(rows: Array) -> void:
+	for row: Dictionary in rows:
+		var c := CropDef.new()
+		c.id = StringName(str(row.get("id", "")))
+		c.index = crops.size()
+		c.display_name = str(row.get("name", c.id))
+		c.seed_item = item_index(StringName(str(row.get("seed", ""))))
+		c.product_item = item_index(StringName(str(row.get("product", ""))))
+		c.grow_ticks = int(row.get("grow_ticks", 0))
+		c.stages = int(row.get("stages", 4))
+		c.yield_count = int(row.get("yield", 1))
+		c.seed_return = int(row.get("seed_return", 1))
+		c.bonus_seed_percent = int(row.get("bonus_seed_percent", 0))
+		if c.id == &"" or c.seed_item < 0 or c.product_item < 0 or c.grow_ticks <= 0 or c.stages < 2:
+			errors.append("작물 '%s': 씨앗·생산물·성장 시간 값 오류" % c.id)
+		crops.append(c)
+
+
+func _load_rules(path: String) -> void:
+	if not FileAccess.file_exists(path):
+		errors.append("파일 없음: %s" % path)
+		return
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+	if not parsed is Dictionary:
+		errors.append("JSON 객체가 아님: %s" % path)
+		return
+	var rules: Dictionary = parsed
+	for pair: Variant in rules.get("starting_kit", []):
+		var st := _stack("시작 지급품", pair)
+		if st.x >= 0:
+			starting_kit[st.x] = st.y
+	max_build_height = int(rules.get("max_build_height", 48))
+	max_decor = int(rules.get("max_decor", 2000))
 
 
 func _v3(v: Variant) -> Vector3i:

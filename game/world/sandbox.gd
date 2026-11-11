@@ -45,8 +45,15 @@ func _ready() -> void:
 	player.sfx = sfx
 	player.fx = fx
 	add_child(player)
-	# 접속한 순서대로 조금씩 떨어진 자리에서 시작한다.
-	player.teleport(Vector3(float(Net.players.size() - 1) * 1.5, 0.05, 0), 0.0)
+	# 전에 있던 자리에서 시작한다. 처음이면 접속한 순서대로 조금씩 떨어진 자리.
+	var spawn := World.saved_spawn(World.my_key()) if Net.is_host() else World.my_spawn
+	if spawn.is_empty():
+		player.teleport(Vector3(float(Net.players.size() - 1) * 1.5, 0.05, 0), 0.0)
+	else:
+		player.teleport(spawn[0], spawn[1])
+	World.spawn_assigned.connect(func(pos: Vector3, yaw: float) -> void: player.teleport(pos, yaw))
+	Save.saved.connect(func(ok: bool, message: String) -> void:
+		hud.toast("저장했습니다" if ok else "저장 실패: %s" % message))
 
 	var layer := CanvasLayer.new()
 	add_child(layer)
@@ -57,6 +64,7 @@ func _ready() -> void:
 		"좌클릭 사격 · 우클릭 조준 · R 재장전 · 1/2/3 무기 · G 수류탄 · E 동료 일으키기",
 		"벽 옆에서 달리며 점프 = 벽 달리기, 다시 점프 = 벽 차기 · 뒤쪽(+Z) 담장 안이 전투 구역",
 		"B 저장소 설치 · N 기준 생산 라인 건설 · X 조준한 구조물 철거 · Esc 마우스 풀기",
+		"F6 저장 · F10 저장하고 나가기 (5분마다 자동 저장)",
 	]
 	layer.add_child(hud)
 	player.hit_confirmed.connect(hud.on_hit)
@@ -88,6 +96,8 @@ func _ready() -> void:
 			World.ticked.connect(_nettest_tick)
 		elif arg.begins_with("--yardshot="):
 			_yard_shot(arg.trim_prefix("--yardshot="))
+		elif arg.begins_with("--savetest="):
+			_save_test(arg.trim_prefix("--savetest="))
 		elif arg == "--combattest":
 			_combat_test()
 		elif arg.begins_with("--shot="):
@@ -111,6 +121,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed(&"toggle_help"):
 		hud.toggle_help()
+	elif event.is_action_pressed(&"save_game"):
+		if not Net.is_host():
+			hud.toast("저장은 호스트가 합니다")
+		elif not Save.save_now():
+			hud.toast("이미 저장하는 중입니다")
+	elif event.is_action_pressed(&"save_and_exit"):
+		Net.leave()
 	elif event.is_action_pressed(&"toggle_fullscreen"):
 		var full := DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED if full else DisplayServer.WINDOW_MODE_FULLSCREEN)
@@ -148,12 +165,20 @@ func build_next_line() -> bool:
 	return false
 
 
+## 개발용(호스트만): 재료를 지급받고 기준 생산 라인을 한 번에 짓는다.
 func build_line(origin: Vector3i) -> void:
+	if not Net.is_host():
+		_last_reject = "기준 라인 건설은 호스트만 (개발용)"
+		return
+	World.grant(1, {"iron_ingot": 80, "biofuel": 10})
 	for m in ReferenceLine.MACHINES:
 		World.request_place(m[0], origin + (m[1] as Vector3i), 0)
 	for i in ReferenceLine.BELTS.size():
 		World.request_place_belt(&"belt", ReferenceLine.belt_path(origin, i))
-	World.request_insert_at(origin + ReferenceLine.GENERATOR_CELL, &"biofuel", 10)
+	var gen: int = World.sim.occupancy.get(origin + ReferenceLine.GENERATOR_CELL, 0)
+	if gen != 0:
+		# 멀리서 넣는 것이므로 거리 검사를 거치지 않고 이벤트로 직접 넣는다.
+		World._emit_event("insert", [gen, "biofuel", 10, World.my_key()])
 
 
 func _process(delta: float) -> void:
@@ -388,7 +413,7 @@ func _combat_test() -> void:
 		Combat._damage_enemy(Combat.enemies[id], 9999.0, 1)
 
 	# 전리품: 지금까지의 처치로 뭔가는 얻었어야 한다(확률이지만 6마리 모두 꽝일 확률은 1% 미만).
-	if Combat.inventory.is_empty():
+	if World.my_count(&"scrap") + World.my_count(&"taint_crystal") == 0:
 		errors.append("처치 %d회 동안 전리품이 하나도 없음" % Combat.kills)
 
 	# 쓰러짐 → 혼자면 3초 뒤 시작 지점에서 다시 일어난다.
@@ -443,3 +468,36 @@ func _yard_shot(path: String) -> void:
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(path)
 	get_tree().quit()
+
+
+## 저장/이어하기 점검 (tools/save_test.sh). write: 공장을 짓고 저장한다. read: 불러온 상태를 출력한다.
+func _save_test(mode: String) -> void:
+	player.force_active = true
+	Combat.auto_spawn = false
+	Save.autosave_enabled = false
+	if mode == "write":
+		player.teleport(Vector3(-6, 0.25, -5), 1.25)
+		await _wait(0.4)   # 내 위치가 호스트에 알려진 뒤에 요청한다(거리 검사)
+		build_line(World.DEV_LINE_ORIGINS[0])
+		World.request_place(&"plot", Vector3i(3, 0, -6), 0)
+		World.request("plant", [World.sim.occupancy.get(Vector3i(3, 0, -6), 0), "glowleaf_seed"])
+		World.request_place(&"floor", Vector3i(-8, 0, -8), 0)
+		World.request_place_free(&"lamp", Vector3(-6.5, 0.2, -6.5), 45)
+		while World.sim.tick_count < 150:
+			await get_tree().physics_frame
+		await get_tree().process_frame   # 마지막 위치 보고가 나가도록
+		await _wait(0.1)
+		World.tick_enabled = false
+		# 틱이 더 돌기 전에 같은 프레임에서 해시를 찍고 저장한다.
+		print("SAVETEST write id=%s tick=%d hash=%s structures=%d" % [
+			Save.world_id, World.sim.tick_count, World.sim.state_hash(), World.sim.structures.size()])
+		var ok := Save.save_now(true)
+		print("SAVETEST saved=%s" % ok)
+		get_tree().quit(0 if ok else 1)
+	else:
+		await get_tree().process_frame
+		var p := player.global_position
+		print("SAVETEST read id=%s tick=%d hash=%s structures=%d pos=%.1f,%.1f yaw=%.2f ingots=%d" % [
+			Save.world_id, World.sim.tick_count, World.sim.state_hash(), World.sim.structures.size(),
+			p.x, p.z, player.yaw, World.my_count(&"iron_ingot")])
+		get_tree().quit(0)

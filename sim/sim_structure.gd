@@ -48,3 +48,12 @@ var item_count: int = 0
 var packed: int = 0               ## 머리부터 연속으로 차 있는 칸 수의 하한(캐시)
 var dst: SimStructure = null
 var passed_total: int = 0
+
+# --- 밭 ---
+var crop: int = -1               ## 작물 인덱스. -1 = 비어 있음
+var growth: int = 0              ## 성장 틱. 작물의 grow_ticks 이상이면 수확 가능
+var watered: bool = false        ## 물을 주면 다음 성장 단계까지 두 배로 자란다
+
+# --- 장식(자유 배치): 위치는 밀리미터, 방향은 도. 정수로 저장해 모든 피어에서 같게 한다 ---
+var free_pos: Vector3i = Vector3i.ZERO
+var free_yaw: int = 0

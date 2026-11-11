@@ -7,7 +7,7 @@ extends RefCounted
 ## - 정수 연산만 쓰고, 순회 순서는 항상 구조물 ID 오름차순이나 미리 계산한 순서다.
 ## - 같은 상태에서 같은 횟수만큼 tick()을 부르면 항상 같은 결과가 나온다.
 
-const SAVE_FORMAT := 1
+const SAVE_FORMAT := 2
 const DIRV: Array[Vector3i] = [Vector3i(0, 0, -1), Vector3i(1, 0, 0), Vector3i(0, 0, 1), Vector3i(-1, 0, 0)]
 const GRID_BUCKET := 32
 
@@ -18,6 +18,13 @@ var next_id: int = 1
 var structures: Dictionary[int, SimStructure] = {}
 var occupancy: Dictionary[Vector3i, int] = {}
 var nodes: Dictionary[Vector3i, int] = {}  ## 광맥: 칸 → 아이템 인덱스
+## 바닥판: 칸의 밑면을 덮는다. 칸 자체를 차지하지 않으므로 그 위에 설비를 놓을 수 있다.
+var plates: Dictionary[Vector3i, int] = {}
+## 벽: 칸의 북쪽(w = 0) 또는 서쪽(w = 3) 모서리에 선다. 키는 (x, y, z, 방향), y는 벽의 밑.
+var walls: Dictionary[Vector4i, int] = {}
+var decor_count: int = 0
+## 플레이어 소지품: 플레이어 키 → (아이템 인덱스 → 수량). 월드 세이브에 함께 저장된다(D-013).
+var inventories: Dictionary[String, Dictionary] = {}
 
 # 종류별 목록. 모두 ID 오름차순을 유지한다.
 var crafters: Array[SimStructure] = []
@@ -26,6 +33,7 @@ var storages: Array[SimStructure] = []
 var junctions: Array[SimStructure] = []
 var belts: Array[SimStructure] = []
 var providers: Array[SimStructure] = []
+var plots: Array[SimStructure] = []
 
 var grids: Array[SimPowerGrid] = []
 var belt_order: Array[SimStructure] = []  ## 하류 먼저
@@ -69,30 +77,125 @@ func add_node(cell: Vector3i, item_id: StringName) -> void:
 	nodes[cell] = db.item_index(item_id)
 
 
+const WALL_HEIGHT := 4
+
+## 바닥판이 덮는 칸들.
+static func plate_cells(def: StructureDef, cell: Vector3i) -> Array[Vector3i]:
+	var out: Array[Vector3i] = []
+	for x in def.footprint.x:
+		for z in def.footprint.z:
+			out.append(cell + Vector3i(x, 0, z))
+	return out
+
+
+## 벽이 차지하는 모서리들. rot이 짝수면 X축을 따라(칸의 북쪽 모서리), 홀수면 Z축을 따라(서쪽 모서리).
+static func wall_edges(def: StructureDef, cell: Vector3i, rot: int) -> Array[Vector4i]:
+	var out: Array[Vector4i] = []
+	for i in def.footprint.x:
+		if rot & 1 == 0:
+			out.append(Vector4i(cell.x + i, cell.y, cell.z, 0))
+		else:
+			out.append(Vector4i(cell.x, cell.y, cell.z + i, 3))
+	return out
+
+
+## 그 칸 바로 아래가 받쳐 주는가: 지면이거나, 바닥판이 깔려 있거나, 다른 구조물이 있다.
+func _cell_supported(c: Vector3i) -> bool:
+	return c.y == 0 or plates.has(c) or occupancy.has(c + Vector3i(0, -1, 0))
+
+
+func _plate_supported(cells: Array[Vector3i]) -> bool:
+	var y := cells[0].y
+	if y == 0:
+		return true
+	var own: Dictionary[Vector3i, bool] = {}
+	for c in cells:
+		own[c] = true
+	for c in cells:
+		# 아래에 구조물(계단 꼭대기, 설비)이 있거나, 같은 높이의 바닥판과 이웃해 있다.
+		if occupancy.has(c + Vector3i(0, -1, 0)):
+			return true
+		for d in DIRV:
+			if not own.has(c + d) and plates.has(c + d):
+				return true
+		# 아래층 벽의 꼭대기가 이 칸의 네 모서리 중 하나에 닿는다.
+		var below := y - WALL_HEIGHT
+		if walls.has(Vector4i(c.x, below, c.z, 0)) or walls.has(Vector4i(c.x, below, c.z, 3)) \
+				or walls.has(Vector4i(c.x, below, c.z + 1, 0)) or walls.has(Vector4i(c.x + 1, below, c.z, 3)):
+			return true
+	return false
+
+
+func _wall_supported(e: Vector4i) -> bool:
+	if e.y == 0 or walls.has(Vector4i(e.x, e.y - WALL_HEIGHT, e.z, e.w)):
+		return true
+	# 모서리 양쪽 칸 중 한 곳에 바닥판이 있다.
+	var here := Vector3i(e.x, e.y, e.z)
+	var other := here + (Vector3i(0, 0, -1) if e.w == 0 else Vector3i(-1, 0, 0))
+	return plates.has(here) or plates.has(other)
+
+
 ## 설치할 수 없으면 이유를, 가능하면 빈 문자열을 돌려준다.
-func can_place(def_id: StringName, cell: Vector3i, rot: int) -> String:
+## check_support를 끄면 받침 검사를 건너뛴다(저장된 월드를 다시 지을 때).
+func can_place(def_id: StringName, cell: Vector3i, rot: int, check_support: bool = true) -> String:
 	var def: StructureDef = db.structures.get(def_id)
 	if def == null:
 		return "unknown_structure"
 	if def.kind == StructureDef.Kind.BELT:
 		return "use_place_belt"
+	if def.kind == StructureDef.Kind.DECOR:
+		return "use_place_free"
+	if cell.y < 0 or cell.y > db.max_build_height:
+		return "out_of_bounds"
+	match def.kind:
+		StructureDef.Kind.FLOOR:
+			var cells := plate_cells(def, cell)
+			for c in cells:
+				if plates.has(c):
+					return "occupied"
+			if check_support and not _plate_supported(cells):
+				return "no_support"
+			return ""
+		StructureDef.Kind.WALL:
+			var supported := false
+			for e in wall_edges(def, cell, rot):
+				if walls.has(e):
+					return "occupied"
+				supported = supported or _wall_supported(e)
+			if check_support and not supported:
+				return "no_support"
+			return ""
 	var has_node := false
+	var supported := true
 	for c in footprint_cells(def, cell, rot):
 		if occupancy.has(c):
 			return "occupied"
 		if nodes.has(c):
 			has_node = true
+		if c.y == cell.y and not _cell_supported(c):
+			supported = false
 	if def.params.get("needs_node", false) and not has_node:
 		return "needs_node"
+	if check_support and not supported:
+		return "no_support"
 	return ""
 
 
-func place(def_id: StringName, cell: Vector3i, rot: int = 0, by: String = "", forced_id: int = 0) -> SimStructure:
-	if can_place(def_id, cell, rot) != "":
+func place(def_id: StringName, cell: Vector3i, rot: int = 0, by: String = "", forced_id: int = 0, check_support: bool = true) -> SimStructure:
+	if can_place(def_id, cell, rot, check_support) != "":
 		return null
 	var def := db.structures[def_id]
 	var s := _new_structure(def, cell, by, forced_id)
 	s.rot = rot & 3
+	match def.kind:
+		StructureDef.Kind.FLOOR:
+			for c in plate_cells(def, cell):
+				plates[c] = s.id
+			return s
+		StructureDef.Kind.WALL:
+			for e in wall_edges(def, cell, s.rot):
+				walls[e] = s.id
+			return s
 	for c in footprint_cells(def, cell, s.rot):
 		occupancy[c] = s.id
 	match def.kind:
@@ -109,14 +212,39 @@ func place(def_id: StringName, cell: Vector3i, rot: int = 0, by: String = "", fo
 			_insert_sorted(storages, s)
 		StructureDef.Kind.JUNCTION:
 			_insert_sorted(junctions, s)
+		StructureDef.Kind.PLOT:
+			_insert_sorted(plots, s)
 	if def.power_radius > 0:
 		_insert_sorted(providers, s)
 	return s
 
 
+## 장식을 자유 위치에 놓는다. 위치는 밀리미터, 방향은 도(정수). 칸을 차지하지 않는다.
+func can_place_free(def_id: StringName, pos_mm: Vector3i) -> String:
+	var def: StructureDef = db.structures.get(def_id)
+	if def == null or def.kind != StructureDef.Kind.DECOR:
+		return "unknown_structure"
+	if pos_mm.y < -1000 or pos_mm.y > (db.max_build_height + WALL_HEIGHT) * 1000:
+		return "out_of_bounds"
+	if decor_count >= db.max_decor:
+		return "too_many"
+	return ""
+
+
+func place_free(def_id: StringName, pos_mm: Vector3i, yaw_deg: int, by: String = "", forced_id: int = 0) -> SimStructure:
+	if can_place_free(def_id, pos_mm) != "":
+		return null
+	var cell := Vector3i(floori(pos_mm.x / 1000.0), floori(pos_mm.y / 1000.0), floori(pos_mm.z / 1000.0))
+	var s := _new_structure(db.structures[def_id], cell, by, forced_id)
+	s.free_pos = pos_mm
+	s.free_yaw = posmod(yaw_deg, 360)
+	decor_count += 1
+	return s
+
+
 ## 벨트 한 줄을 설치한다. 칸은 상류에서 하류 순서이고 이웃한 칸끼리 수평으로 붙어 있어야 한다.
 ## 한 칸짜리 벨트는 dir로 방향을 준다.
-func can_place_belt(path: Array[Vector3i], dir: int = -1) -> String:
+func can_place_belt(path: Array[Vector3i], dir: int = -1, check_support: bool = true) -> String:
 	if path.is_empty():
 		return "empty_path"
 	if path.size() == 1 and (dir < 0 or dir > 3):
@@ -125,15 +253,19 @@ func can_place_belt(path: Array[Vector3i], dir: int = -1) -> String:
 	for i in path.size():
 		if occupancy.has(path[i]) or seen.has(path[i]):
 			return "occupied"
+		if path[i].y < 0 or path[i].y > db.max_build_height:
+			return "out_of_bounds"
+		if check_support and not _cell_supported(path[i]):
+			return "no_support"
 		seen[path[i]] = true
 		if i > 0 and DIRV.find(path[i] - path[i - 1]) < 0:
 			return "not_adjacent"
 	return ""
 
 
-func place_belt(def_id: StringName, path: Array[Vector3i], by: String = "", dir: int = -1, forced_id: int = 0) -> SimStructure:
+func place_belt(def_id: StringName, path: Array[Vector3i], by: String = "", dir: int = -1, forced_id: int = 0, check_support: bool = true) -> SimStructure:
 	var def: StructureDef = db.structures.get(def_id)
-	if def == null or def.kind != StructureDef.Kind.BELT or can_place_belt(path, dir) != "":
+	if def == null or def.kind != StructureDef.Kind.BELT or can_place_belt(path, dir, check_support) != "":
 		return null
 	var s := _new_structure(def, path[0], by, forced_id)
 	s.cells = path.duplicate()
@@ -157,11 +289,23 @@ func remove(id: int) -> Variant:
 	if s == null:
 		return null
 	var contents := contents_of(s)
-	var cells := s.cells if s.kind == StructureDef.Kind.BELT else footprint_cells(s.def, s.cell, s.rot)
-	for c in cells:
-		occupancy.erase(c)
+	match s.kind:
+		StructureDef.Kind.BELT:
+			for c in s.cells:
+				occupancy.erase(c)
+		StructureDef.Kind.FLOOR:
+			for c in plate_cells(s.def, s.cell):
+				plates.erase(c)
+		StructureDef.Kind.WALL:
+			for e in wall_edges(s.def, s.cell, s.rot):
+				walls.erase(e)
+		StructureDef.Kind.DECOR:
+			decor_count -= 1
+		_:
+			for c in footprint_cells(s.def, s.cell, s.rot):
+				occupancy.erase(c)
 	structures.erase(id)
-	for list: Array[SimStructure] in [crafters, generators, storages, junctions, belts, providers]:
+	for list: Array[SimStructure] in [crafters, generators, storages, junctions, belts, providers, plots]:
 		list.erase(s)
 	_dirty = true
 	return contents
@@ -191,6 +335,10 @@ func contents_of(s: SimStructure) -> Dictionary[int, int]:
 			for v in s.slots:
 				if v != 0:
 					out[v - 1] = out.get(v - 1, 0) + 1
+		StructureDef.Kind.PLOT:
+			# 자라던 작물은 씨앗으로 돌려준다.
+			if s.crop >= 0:
+				out[db.crops[s.crop].seed_item] = 1
 	return out
 
 
@@ -235,6 +383,182 @@ func take(id: int, item_id: StringName, count: int) -> int:
 		_storage_remove(s, item, n)
 		return n
 	return 0
+
+
+# ---------------------------------------------------------------------------
+# 소지품, 비용, 손 제작
+# ---------------------------------------------------------------------------
+
+## 처음 보는 플레이어면 시작 지급품을 준다. 새로 만들었으면 true.
+func ensure_player(key: String) -> bool:
+	if inventories.has(key):
+		return false
+	inventories[key] = db.starting_kit.duplicate()
+	return true
+
+
+func inv_count(key: String, item: int) -> int:
+	var inv: Dictionary = inventories.get(key, {})
+	return int(inv.get(item, 0))
+
+
+func inv_add(key: String, item: int, count: int) -> void:
+	if count <= 0 or item < 0 or not inventories.has(key):
+		return
+	var inv: Dictionary = inventories[key]
+	inv[item] = int(inv.get(item, 0)) + count
+
+
+## 있는 만큼만 뺀다. 실제로 뺀 수량을 돌려준다.
+func inv_remove(key: String, item: int, count: int) -> int:
+	if count <= 0 or not inventories.has(key):
+		return 0
+	var inv: Dictionary = inventories[key]
+	var have := int(inv.get(item, 0))
+	var n := mini(have, count)
+	if n >= have:
+		inv.erase(item)
+	else:
+		inv[item] = have - n
+	return n
+
+
+func inv_add_all(key: String, items: Dictionary) -> void:
+	for item: int in items:
+		inv_add(key, item, int(items[item]))
+
+
+## 설치 비용(아이템 인덱스 → 수량). 벨트는 칸 수에 비례한다.
+func build_cost(def: StructureDef, belt_cells: int = 0) -> Dictionary[int, int]:
+	var mult := 1
+	if def.kind == StructureDef.Kind.BELT:
+		var per := maxi(int(def.params.get("cells_per_cost", 1)), 1)
+		mult = (belt_cells + per - 1) / per
+	var out: Dictionary[int, int] = {}
+	for i in def.cost_items.size():
+		out[def.cost_items[i]] = def.cost_counts[i] * mult
+	return out
+
+
+func can_afford(key: String, cost: Dictionary[int, int]) -> bool:
+	for item: int in cost:
+		if inv_count(key, item) < cost[item]:
+			return false
+	return true
+
+
+func pay(key: String, cost: Dictionary[int, int]) -> void:
+	for item: int in cost:
+		inv_remove(key, item, cost[item])
+
+
+## 구조물의 설치 비용(철거하면 전액 돌려준다, D-017).
+func refund_of(s: SimStructure) -> Dictionary[int, int]:
+	return build_cost(s.def, s.cells.size())
+
+
+## 소지품에서 구조물로 넣는다. 들어간 수량을 돌려준다.
+func insert_from(key: String, id: int, item_id: StringName, count: int) -> int:
+	var item := db.item_index(item_id)
+	var n := insert(id, item_id, mini(count, inv_count(key, item)))
+	inv_remove(key, item, n)
+	return n
+
+
+## 구조물에서 소지품으로 꺼낸다. 꺼낸 수량을 돌려준다.
+func take_to(key: String, id: int, item_id: StringName, count: int) -> int:
+	if not inventories.has(key):
+		return 0
+	var n := take(id, item_id, count)
+	inv_add(key, db.item_index(item_id), n)
+	return n
+
+
+## 작업대 손 제작. 재료가 되는 만큼 최대 times번 만든다. 만든 횟수를 돌려준다.
+func craft(key: String, recipe_id: StringName, times: int) -> int:
+	var r: RecipeDef = db.recipes.get(recipe_id)
+	if r == null or not r.machines.has(&"workbench") or not inventories.has(key):
+		return 0
+	var done := 0
+	while done < times:
+		for i in r.in_items.size():
+			if inv_count(key, r.in_items[i]) < r.in_counts[i]:
+				return done
+		for i in r.in_items.size():
+			inv_remove(key, r.in_items[i], r.in_counts[i])
+		inv_add(key, r.out_item, r.out_count)
+		done += 1
+	return done
+
+
+# ---------------------------------------------------------------------------
+# 밭
+# ---------------------------------------------------------------------------
+
+## 밭의 상태를 한 단어로: "empty", "growing", "ready".
+func plot_state(s: SimStructure) -> String:
+	if s.crop < 0:
+		return "empty"
+	return "ready" if s.growth >= db.crops[s.crop].grow_ticks else "growing"
+
+
+func plant(key: String, id: int, seed_id: StringName) -> bool:
+	var s: SimStructure = structures.get(id)
+	var seed_item := db.item_index(seed_id)
+	var crop := db.crop_for_seed(seed_item)
+	if s == null or s.kind != StructureDef.Kind.PLOT or s.crop >= 0 or crop == null:
+		return false
+	if inv_remove(key, seed_item, 1) != 1:
+		return false
+	s.crop = crop.index
+	s.growth = 0
+	s.watered = false
+	return true
+
+
+func water(id: int) -> bool:
+	var s: SimStructure = structures.get(id)
+	if s == null or s.kind != StructureDef.Kind.PLOT or plot_state(s) != "growing" or s.watered:
+		return false
+	s.watered = true
+	return true
+
+
+## 다 자란 작물을 거둔다. 얻은 것(아이템 인덱스 → 수량), 거둘 수 없으면 빈 사전.
+func harvest(key: String, id: int) -> Dictionary[int, int]:
+	var out: Dictionary[int, int] = {}
+	var s: SimStructure = structures.get(id)
+	if s == null or s.kind != StructureDef.Kind.PLOT or plot_state(s) != "ready" or not inventories.has(key):
+		return out
+	var crop := db.crops[s.crop]
+	out[crop.product_item] = crop.yield_count
+	# 추가 씨앗은 틱과 구조물 ID로 정해지므로 모든 피어에서 결과가 같다.
+	var roll := absi((tick_count * 7919 + s.id * 104729) % 100)
+	var seeds := crop.seed_return + (1 if roll < crop.bonus_seed_percent else 0)
+	if seeds > 0:
+		out[crop.seed_item] = out.get(crop.seed_item, 0) + seeds
+	inv_add_all(key, out)
+	s.crop = -1
+	s.growth = 0
+	s.watered = false
+	return out
+
+
+## 그 칸에 놓인 출력/입력 포트의 방향. 벨트를 포트에 맞춰 까는 데 쓴다. 없으면 -1.
+func port_dir_at(attach_cell: Vector3i, want_output: bool) -> int:
+	for d in 4:
+		var id: int = occupancy.get(attach_cell - DIRV[d], 0)
+		var s: SimStructure = structures.get(id)
+		if s == null or s.kind == StructureDef.Kind.BELT:
+			continue
+		for i in s.def.port_cells.size():
+			var dir := (s.def.port_dirs[i] + s.rot) & 3
+			if dir != d or s.cell + rotate_cell(s.def.port_cells[i], s.rot) != attach_cell - DIRV[d]:
+				continue
+			var io := s.def.port_ios[i]
+			if io == StructureDef.PortIO.ANY or (io == StructureDef.PortIO.OUT) == want_output:
+				return d
+	return -1
 
 
 func count_in(id: int, item_id: StringName) -> int:
@@ -389,6 +713,21 @@ func tick() -> void:
 				j.j_item = 0
 				j.rr = (idx + 1) % n
 				break
+
+	# 6. 밭: 물을 준 밭은 다음 성장 단계까지 두 배로 자란다.
+	for p in plots:
+		if p.crop < 0:
+			continue
+		var crop := db.crops[p.crop]
+		if p.growth >= crop.grow_ticks:
+			continue
+		if p.watered:
+			var stage_before := p.growth * (crop.stages - 1) / crop.grow_ticks
+			p.growth = mini(p.growth + 2, crop.grow_ticks)
+			if p.growth * (crop.stages - 1) / crop.grow_ticks != stage_before:
+				p.watered = false
+		else:
+			p.growth += 1
 
 	var t5 := Time.get_ticks_usec()
 	profile[0] += t1 - t0
@@ -657,10 +996,25 @@ func to_dict() -> Dictionary:
 				row["dir"] = s.dir_out
 				row["slots"] = s.slots
 				row["passed"] = s.passed_total
+			StructureDef.Kind.PLOT:
+				row["crop"] = String(db.crops[s.crop].id) if s.crop >= 0 else ""
+				row["growth"] = s.growth
+				row["watered"] = s.watered
+			StructureDef.Kind.DECOR:
+				row["pos"] = [s.free_pos.x, s.free_pos.y, s.free_pos.z]
+				row["yaw"] = s.free_yaw
 		rows.append(row)
+	var inv_rows: Array = []
+	for key: String in inventories:
+		var pairs := PackedInt32Array()
+		var inv: Dictionary = inventories[key]
+		for item: int in inv:
+			pairs.append(item)
+			pairs.append(int(inv[item]))
+		inv_rows.append([key, pairs])
 	return {
 		"format": SAVE_FORMAT, "tick": tick_count, "next_id": next_id,
-		"palette": palette, "nodes": node_rows, "structures": rows,
+		"palette": palette, "nodes": node_rows, "structures": rows, "inventories": inv_rows,
 	}
 
 
@@ -696,9 +1050,13 @@ static func from_dict(content: ContentDB, d: Dictionary) -> SimWorld:
 			var path: Array[Vector3i] = []
 			for i in range(0, flat.size(), 3):
 				path.append(Vector3i(flat[i], flat[i + 1], flat[i + 2]))
-			s = w.place_belt(def_id, path, str(row["by"]), int(row["dir"]), int(row["id"]))
+			s = w.place_belt(def_id, path, str(row["by"]), int(row["dir"]), int(row["id"]), false)
+		elif def.kind == StructureDef.Kind.DECOR:
+			var p: Array = row["pos"]
+			s = w.place_free(def_id, Vector3i(int(p[0]), int(p[1]), int(p[2])), int(row["yaw"]), str(row["by"]), int(row["id"]))
 		else:
-			s = w.place(def_id, cell, int(row["rot"]), str(row["by"]), int(row["id"]))
+			# 받침이 나중에 철거됐을 수 있으므로 받침 검사 없이 다시 짓는다.
+			s = w.place(def_id, cell, int(row["rot"]), str(row["by"]), int(row["id"]), false)
 		if s == null:
 			continue
 		match def.kind:
@@ -712,6 +1070,11 @@ static func from_dict(content: ContentDB, d: Dictionary) -> SimWorld:
 					s.out_count = int(row["out"])
 					s.state = int(row["state"])
 					s.produced_total = int(row["produced"])
+			StructureDef.Kind.PLOT:
+				var crop := content.crop_by_id(StringName(str(row["crop"])))
+				s.crop = crop.index if crop != null else -1
+				s.growth = int(row["growth"])
+				s.watered = bool(row["watered"])
 			StructureDef.Kind.GENERATOR:
 				s.fuel_item = remap[int(row["fuel_item"])] if int(row["fuel_item"]) >= 0 else -1
 				s.fuel_count = int(row["fuel"])
@@ -731,6 +1094,13 @@ static func from_dict(content: ContentDB, d: Dictionary) -> SimWorld:
 						s.slots[i] = remap[slots[i] - 1] + 1
 						s.item_count += 1
 				s.passed_total = int(row["passed"])
+	for inv_row: Array in d.get("inventories", []):
+		var inv: Dictionary = {}
+		var pairs: PackedInt32Array = inv_row[1]
+		for i in range(0, pairs.size(), 2):
+			if remap[pairs[i]] >= 0 and pairs[i + 1] > 0:
+				inv[remap[pairs[i]]] = pairs[i + 1]
+		w.inventories[str(inv_row[0])] = inv
 	w.tick_count = int(d["tick"])
 	w.next_id = maxi(w.next_id, int(d["next_id"]))
 	return w

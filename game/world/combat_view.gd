@@ -20,7 +20,7 @@ var _last_hp: float = CombatRules.MAX_HP
 func _ready() -> void:
 	Combat.respawned.connect(_on_respawned)
 	Combat.enemy_died.connect(_on_enemy_died)
-	Combat.inventory_changed.connect(_on_inventory)
+	World.items_gained.connect(_on_items_gained)
 	Combat.shot_seen.connect(_on_shot_seen)
 	Combat.projectile_spawned.connect(_on_projectile)
 	Combat.projectile_ended.connect(_on_projectile_end)
@@ -46,9 +46,9 @@ func _process(delta: float) -> void:
 	hud.grenades = Combat.my_grenades
 
 	var lines: PackedStringArray = []
-	for id: String in Combat.inventory:
-		var def: ItemDef = Registry.db.items.get(StringName(id))
-		lines.append("%s  %d" % [def.display_name if def != null else id, int(Combat.inventory[id])])
+	var inv := World.my_inventory()
+	for item: int in inv:
+		lines.append("%s  %d" % [Registry.db.item_def(item).display_name, int(inv[item])])
 	hud.side_text = "\n".join(lines)
 
 	hud.center_text = ""
@@ -110,7 +110,9 @@ func _on_enemy_died(_id: int, pos: Vector3, killer: int) -> void:
 		player.stat_kills += 1
 
 
-func _on_inventory(gained: Dictionary) -> void:
+func _on_items_gained(key: String, gained: Dictionary) -> void:
+	if key != World.my_key():
+		return
 	var parts: PackedStringArray = []
 	for id: String in gained:
 		var def: ItemDef = Registry.db.items.get(StringName(id))

@@ -1,0 +1,4 @@
+[
+  {"id": "glowleaf", "name": "빛잎", "seed": "glowleaf_seed", "product": "glowleaf",
+   "grow_ticks": 1200, "stages": 4, "yield": 4, "seed_return": 1, "bonus_seed_percent": 25}
+]

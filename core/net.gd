@@ -49,18 +49,18 @@ func may_build(peer_id: int) -> bool:
 
 
 ## 혼자 플레이. 소켓을 열지 않으므로 네트워크 없이도 된다. 코드 경로는 호스트와 같다.
-func start_single() -> void:
+func start_single(world_id: String = "") -> void:
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
-	_begin_hosting()
+	_begin_hosting(world_id)
 
 
-func host(port: int = DEFAULT_PORT) -> Error:
+func host(port: int = DEFAULT_PORT, world_id: String = "") -> Error:
 	var peer := ENetMultiplayerPeer.new()
 	var err := peer.create_server(port, MAX_PLAYERS - 1)
 	if err != OK:
 		return err
 	multiplayer.multiplayer_peer = peer
-	_begin_hosting()
+	_begin_hosting(world_id)
 	return OK
 
 
@@ -78,16 +78,30 @@ func leave() -> void:
 	_leave("left")
 
 
-func _begin_hosting() -> void:
+## world_id가 있으면 그 세이브를 이어 하고, 없으면 새 월드를 만든다.
+func _begin_hosting(world_id: String) -> void:
 	players = {1: {"name": local_name, "role": Role.OWNER}}
+	if world_id != "":
+		var loaded := Save.load_world(world_id)
+		if loaded.is_empty():
+			var why := Save.store.last_error
+			_leave("load_failed")
+			disconnected.emit("세이브를 열 수 없습니다: %s" % why)
+			return
+		World.start_loaded(loaded["sim"], loaded["players"])
+	else:
+		Save.new_world("%s의 월드" % local_name)
+		World.start_new()
 	in_world = true
-	World.start_new()
 	players_changed.emit()
 	connected.emit()
 
 
 func _leave(reason: String) -> void:
 	var was_active := in_world or multiplayer.multiplayer_peer is ENetMultiplayerPeer
+	# 호스트가 나갈 때는 저장하고 끝낸다.
+	if in_world and multiplayer.is_server():
+		Save.save_now(true)
 	in_world = false
 	World.stop()
 	if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
@@ -128,8 +142,21 @@ func _hello(their_version: String, their_hash: String, their_name: String) -> vo
 	var clean_name := their_name.strip_edges().left(24)
 	if clean_name == "":
 		clean_name = "Player %d" % players.size()
-	players[sender] = {"name": clean_name, "role": role_overrides.get(clean_name, default_role)}
+	# 이름이 소지품의 열쇠이므로 접속 중인 사람과 겹치면 번호를 붙인다(Steam ID로 바뀌기 전까지).
+	var role: int = role_overrides.get(clean_name, default_role)
+	var taken := true
+	var suffix := 1
+	var unique := clean_name
+	while taken:
+		taken = false
+		for p: int in players:
+			if (players[p] as Dictionary).get("name", "") == unique:
+				taken = true
+				suffix += 1
+				unique = "%s (%d)" % [clean_name, suffix]
+	players[sender] = {"name": unique, "role": role}
 	World.send_snapshot(sender)
+	World.register_player(sender)
 	_players.rpc(players)
 	players_changed.emit()
 
