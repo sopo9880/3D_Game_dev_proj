@@ -9,6 +9,7 @@ var health: float = -1.0          ## 0 미만이면 체력 표시를 숨긴다
 var grenades: int = -1
 var side_text: String = ""        ## 오른쪽 가운데(소지품 등)
 var center_text: String = ""      ## 화면 가운데 큰 안내(쓰러짐 등)
+var build_text: String = ""       ## 건축 모드 안내(조준선 아래)
 
 var _hit_time: float = 0.0
 var _hit_color: Color = Color.WHITE
@@ -21,8 +22,11 @@ var _version: Label
 var _side: Label
 var _center: Label
 var _toast: Label
+var _build: Label
 var _toast_time: float = 0.0
 var _hurt: float = 0.0
+var _help_open: bool = true
+var _help_full: String = ""
 
 
 func _ready() -> void:
@@ -47,6 +51,9 @@ func _ready() -> void:
 	_toast = _label(Control.PRESET_CENTER, 20, HORIZONTAL_ALIGNMENT_CENTER)
 	_toast.anchor_top = 0.72
 	_toast.anchor_bottom = 0.72
+	_build = _label(Control.PRESET_CENTER, 18, HORIZONTAL_ALIGNMENT_CENTER)
+	_build.anchor_top = 0.6
+	_build.anchor_bottom = 0.6
 	_help.text = "\n".join([
 		"WASD 이동 · Shift 달리기 · Space 점프 (턱 앞에서 앞으로 밀면 올라타기) · Ctrl/C 앉기 (달리다 앉으면 슬라이딩) · 벽 옆에서 달리며 점프 = 벽 달리기, 다시 점프 = 벽 차기",
 		"좌클릭 사격 · 우클릭 조준 · R 재장전 · 1/2/3 또는 휠 무기 교체",
@@ -54,6 +61,7 @@ func _ready() -> void:
 	])
 	if not help_lines.is_empty():
 		_help.text = "\n".join(help_lines)
+	_help_full = _help.text
 	_paused.text = "화면을 클릭하면 시작합니다"
 
 
@@ -74,7 +82,14 @@ func hurt() -> void:
 
 
 func toggle_help() -> void:
-	_help.visible = not _help.visible
+	_help_open = not _help_open
+	_help.text = _help_full if _help_open else "H 조작 도움말"
+
+
+## 도움말을 한 줄로 접어 둔다(H로 펼친다).
+func collapse_help() -> void:
+	_help_open = true
+	toggle_help()
 
 
 func _process(delta: float) -> void:
@@ -82,7 +97,8 @@ func _process(delta: float) -> void:
 		return
 	_hit_time = maxf(_hit_time - delta, 0.0)
 	var g := player.gun
-	var ammo_text := "∞" if g.def.infinite_ammo else str(g.def.mag)
+	var reserve := player.reserve_ammo()
+	var ammo_text := "∞" if g.def.infinite_ammo else (str(reserve) if reserve >= 0 else str(g.def.mag))
 	_ammo.text = "%s\n%d / %s%s" % [g.def.display_name, g.mag, ammo_text, "  재장전…" if g.is_reloading() else ""]
 	var acc := 100.0 * player.stat_hits / maxi(player.stat_shots, 1)
 	var head_rate := 100.0 * player.stat_heads / maxi(player.stat_hits, 1)
@@ -92,6 +108,7 @@ func _process(delta: float) -> void:
 	_top.text = message
 	_side.text = side_text
 	_center.text = center_text
+	_build.text = build_text
 	_toast_time = maxf(_toast_time - delta, 0.0)
 	_toast.modulate.a = clampf(_toast_time, 0.0, 1.0)
 	_hurt = maxf(_hurt - delta * 2.5, 0.0)
@@ -111,7 +128,7 @@ func _draw() -> void:
 		draw_rect(Rect2(0, w, w, size.y - w * 2.0), edge)
 		draw_rect(Rect2(size.x - w, w, w, size.y - w * 2.0), edge)
 	if health >= 0.0:
-		var bar := Rect2(c.x - 130.0, size.y - 150.0, 260.0, 16.0)
+		var bar := Rect2(c.x - 130.0, size.y - 46.0, 260.0, 16.0)
 		draw_rect(bar.grow(3.0), Color(0, 0, 0, 0.55))
 		var frac := clampf(health / CombatRules.MAX_HP, 0.0, 1.0)
 		var bar_color := Color(0.35, 0.85, 0.45) if frac > 0.35 else Color(0.9, 0.3, 0.25)

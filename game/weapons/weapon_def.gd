@@ -5,6 +5,7 @@ extends RefCounted
 var id: StringName
 var display_name: String
 var slot: int = 1
+var ammo_item: StringName = &""    ## 재장전할 때 소지품에서 쓰는 탄약. 비어 있으면 탄약이 필요 없다
 
 var damage: float = 10.0
 var pellets: int = 1
@@ -99,6 +100,7 @@ static func from_dict(row: Dictionary) -> WeaponDef:
 			TYPE_INT: d.set(key, int(row[key]))
 			TYPE_FLOAT: d.set(key, float(row[key]))
 			TYPE_BOOL: d.set(key, bool(row[key]))
+			TYPE_STRING_NAME: d.set(key, StringName(str(row[key])))
 			_: push_warning("무기 %s: 모르는 항목 '%s'" % [d.id, key])
 	return d
 
@@ -111,5 +113,5 @@ func to_dict() -> Dictionary:
 		if key in ["id", "display_name"] or not (p["usage"] & PROPERTY_USAGE_SCRIPT_VARIABLE):
 			continue
 		var v: Variant = get(key)
-		out[key] = snappedf(v, 0.001) if v is float else v
+		out[key] = snappedf(v, 0.001) if v is float else (String(v) if v is StringName else v)
 	return out

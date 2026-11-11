@@ -47,30 +47,32 @@ res://
 │   ├─ registry.gd         # 콘텐츠 로딩·검증
 │   ├─ net.gd              # 호스트/참가/싱글, 접속 절차, 플레이어 목록과 역할
 │   ├─ world.gd            # 틱, 요청 검증, 이벤트 방송, 스냅샷, 위치 중계
-│   └─ combat.gd           # 체력, 사격 검증, 적 생성·동기화, 투사체, 전리품   (save는 예정)
+│   ├─ combat.gd           # 체력, 사격 검증, 적 생성·동기화, 투사체, 전리품
+│   └─ save.gd             # 자동 저장, 스레드 쓰기, 불러오기
 ├─ data/                   # items.json, recipes.json, structures.json, weapons.json
 ├─ sim/                    # ★ 순수 로직. Node, 씬 트리, 오토로드 접근 금지
 │   ├─ content/            # ContentDB, ItemDef, RecipeDef, StructureDef
-│   ├─ sim_world.gd        # 설치·철거, tick(), 토폴로지, 직렬화
+│   ├─ sim_world.gd        # 설치·철거·받침, 소지품·비용·제작, 밭, tick(), 토폴로지, 직렬화
 │   ├─ sim_structure.gd    # 구조물 하나의 상태
 │   └─ sim_power_grid.gd
 ├─ game/                   # 씬과 Node 스크립트
 │   ├─ player/             # 컨트롤러, 1인칭 총 모형
 │   ├─ weapons/            # WeaponDef, Gun(연사·탄약·반동 규칙)
 │   ├─ main.gd             # 시작 화면
+│   ├─ build/              # 건축 모드(미리보기, 벨트 경로, 되돌리기)
 │   ├─ combat/             # CombatRules(씬과 무관한 전투 계산)
 │   ├─ enemies/            # EnemyDef, Enemy(호스트 AI + 클라이언트 꼭두각시)
 │   ├─ world/              # 개발용 샌드박스, 전투 구역, 전투 화면 연결, 다른 플레이어 아바타
 │   ├─ factory_view/       # 구조물과 벨트 물건 그리기
 │   ├─ range/              # 사격 감각 테스트용 사격장
-│   ├─ ui/                 # HUD, 수치 조정 패널
+│   ├─ ui/                 # HUD, 수치 조정 패널, 설비 패널
 │   ├─ audio/, fx/         # 임시 합성 효과음, 임시 효과
-│   └─ (build 는 예정)
-├─ tests/                  # run_tests.gd, test_case.gd, sim/test_*.gd
-└─ tools/                  # bench_factory.gd, net_test.sh
+├─ save/                   # SaveStore(파일 읽고 쓰기), SaveMigrations
+├─ tests/                  # run_tests.gd, sim/ combat/ save/ 테스트, fixtures/(옛 형식 세이브)
+└─ tools/                  # bench_factory.gd, net_test.sh, save_test.sh
 ```
 
-지금은 `SimWorld` 한 파일에 공장·전력·격자가 함께 있다. 농사와 복원이 들어오는 M2~M3에서 `sim/factory`, `sim/farming` 등으로 나눈다.
+지금은 `SimWorld` 한 파일(약 1,000줄)에 공장·전력·격자·소지품·밭이 함께 있다. 복원이 들어오는 M3에서 주제별 파일로 나눈다.
 
 ### 계층 규칙
 
@@ -116,21 +118,34 @@ res://
 
 피해 = 무기 피해 × 거리 감소(호스트가 아는 위치 기준) × 머리 배율. 규칙은 `CombatRules`에 있고 단위 테스트가 있다. 탄약 수는 아직 호스트가 세지 않는다(인벤토리가 생기는 M2에서 추가).
 
-### 명령과 이벤트
+### 요청과 이벤트 (구현됨)
+
+상태를 바꾸는 모든 일은 **(작업 이름, 인자 배열)** 한 쌍이다. RPC는 요청용 하나(`_req`)와 이벤트용 하나(`_ev`)뿐이다.
 
 ```
-클라이언트                         호스트                         모든 피어
-   │  request_place(def, cell, rot)  │                               │
-   ├────────────────────────────────▶│ 권한·점유·재료 검사            │
-   │                                 │ 상태 변경, ID 발급             │
-   │                                 ├──── ev_structure_placed ─────▶│
-   │◀──── (실패 시) ev_rejected ─────┤                               │
+클라이언트                          호스트                              모든 피어
+   │ _req("place", [def, cell, rot])   │                                    │
+   ├──────────────────────────────────▶│ _do(): 형식·권한·자리·받침·재료·거리 │
+   │                                   │ 통과 → 이벤트 인자 확정(ID, 주인)    │
+   │                                   │ _apply() ── _ev(틱, "place", […]) ─▶│ _apply()
+   │◀────── (거절) 이유 ───────────────┤                                    │
 ```
 
-- 요청 RPC: `any_peer`, `reliable`. 이름은 `request_*`.
-- 이벤트 RPC: `authority`, `reliable`. 이름은 `ev_*`.
-- **호스트는 클라이언트가 보낸 어떤 값도 믿지 않는다.** 보낸 사람은 인자가 아니라 `multiplayer.get_remote_sender_id()`로 확인한다.
-- 클라이언트는 설치 요청 후 응답을 기다리는 동안 반투명 "대기" 모형을 보여 준다. 예측 설치는 하지 않는다.
+- 호스트의 `_do()`만 검증한다. `_apply()`는 검증 없이 상태만 바꾸며 호스트와 클라이언트가 **같은 함수**를 쓴다. 그래서 새 작업을 추가할 때 양쪽 구현이 어긋날 수 없다.
+- **호스트는 클라이언트가 보낸 어떤 값도 믿지 않는다.** 인자는 개수와 형을 먼저 확인하고, 보낸 사람은 인자가 아니라 연결에서 확인한다.
+- 설비를 쓰는 작업(넣기, 꺼내기, 레시피, 밭)은 그 구조물에서 10m 안에 있어야 하고, 손 제작은 작업대에서 10m 안이어야 한다.
+- 예측 설치는 하지 않는다. 미리보기는 클라이언트가 같은 규칙으로 계산해 보여 줄 뿐이다.
+
+| 작업 | 하는 일 |
+| --- | --- |
+| `place` `belt` `free` | 설치(칸 / 벨트 경로 / 자유 배치). 비용 차감 |
+| `remove` | 철거. 비용과 내용물을 철거한 사람에게 |
+| `insert` `take` | 소지품 ↔ 구조물 |
+| `recipe` | 제작 기계의 레시피 변경(안에 든 것은 돌려받는다) |
+| `craft` | 작업대 손 제작 |
+| `plant` `water` `harvest` | 밭 |
+| `consume` | 탄약 사용(재장전할 때) |
+| `join` `grant` | 호스트 내부용: 플레이어 등록(시작 지급품), 전리품 지급 |
 
 ### 공장 상태 복제 (구현됨)
 

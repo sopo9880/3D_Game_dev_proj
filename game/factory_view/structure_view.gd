@@ -11,6 +11,13 @@ const KIND_COLORS: Dictionary[int, Color] = {
 	StructureDef.Kind.STORAGE: Color(0.4, 0.6, 0.8),
 	StructureDef.Kind.GENERATOR: Color(0.4, 0.75, 0.45),
 	StructureDef.Kind.POWER_POLE: Color(0.85, 0.8, 0.4),
+	StructureDef.Kind.FLOOR: Color(0.62, 0.6, 0.56),
+	StructureDef.Kind.WALL: Color(0.7, 0.68, 0.62),
+	StructureDef.Kind.STAIRS: Color(0.58, 0.56, 0.52),
+	StructureDef.Kind.PLOT: Color(0.36, 0.26, 0.18),
+	StructureDef.Kind.WORKBENCH: Color(0.6, 0.45, 0.3),
+	StructureDef.Kind.DECOR: Color(0.75, 0.6, 0.45),
+	-2: Color(0.35, 0.85, 0.5),
 }
 const ITEM_COLORS: Array[Color] = [
 	Color(0.55, 0.45, 0.4), Color(0.8, 0.82, 0.86), Color(0.4, 0.9, 0.6), Color(0.6, 0.8, 0.3),
@@ -22,6 +29,7 @@ const MAX_ITEMS := 20000
 var _nodes: Dictionary[int, Node3D] = {}
 var _items: MultiMeshInstance3D
 var _labels: Dictionary[int, Label3D] = {}
+var _plants: Dictionary[int, MeshInstance3D] = {}
 var _materials: Dictionary[int, StandardMaterial3D] = {}
 
 
@@ -54,6 +62,7 @@ func rebuild() -> void:
 		_nodes[id].queue_free()
 	_nodes.clear()
 	_labels.clear()
+	_plants.clear()
 	if World.sim == null:
 		return
 	for id: int in World.sim.structures:
@@ -65,35 +74,109 @@ static func structure_id_of(collider: Object) -> int:
 	return int(collider.get_meta(&"structure_id", 0)) if collider != null else 0
 
 
+## 구조물이 화면에서 차지하는 상자들: [[Transform3D, 크기], ...].
+## 실제 표시와 건축 모드의 미리보기가 같은 계산을 쓴다.
+static func shapes_for(def: StructureDef, cell: Vector3i, rot: int, belt_cells: Array[Vector3i] = [],
+		free_pos_mm: Vector3i = Vector3i.ZERO, yaw_deg: int = 0) -> Array:
+	var out: Array = []
+	match def.kind:
+		StructureDef.Kind.BELT:
+			for c in belt_cells:
+				out.append([Transform3D(Basis.IDENTITY, Vector3(c) + Vector3(0.5, 0.1, 0.5)), Vector3(1.0, 0.2, 1.0)])
+		StructureDef.Kind.FLOOR:
+			var size := Vector3(def.footprint.x, 0.2, def.footprint.z)
+			out.append([Transform3D(Basis.IDENTITY, Vector3(cell) + Vector3(size.x * 0.5, 0.1, size.z * 0.5)), size])
+		StructureDef.Kind.WALL:
+			var w := float(def.footprint.x)
+			var h := float(SimWorld.WALL_HEIGHT)
+			if rot & 1 == 0:
+				out.append([Transform3D(Basis.IDENTITY, Vector3(cell) + Vector3(w * 0.5, h * 0.5, 0.0)), Vector3(w, h, 0.2)])
+			else:
+				out.append([Transform3D(Basis.IDENTITY, Vector3(cell) + Vector3(0.0, h * 0.5, w * 0.5)), Vector3(0.2, h, w)])
+		StructureDef.Kind.STAIRS:
+			# 발자국의 경계 상자 안을 대각선으로 가로지르는 경사판. rot 0 = 남쪽(+Z)이 낮고 북쪽이 높다.
+			var b := _bounds(def, cell, rot)
+			var center: Vector3 = (b[0] + b[1]) * 0.5
+			var run := float(def.footprint.z)
+			var rise := float(def.footprint.y)
+			var basis := Basis(Vector3.UP, -rot * PI * 0.5) * Basis(Vector3.RIGHT, atan2(rise, run))
+			out.append([Transform3D(basis, center), Vector3(def.footprint.x, 0.2, sqrt(run * run + rise * rise))])
+		StructureDef.Kind.DECOR:
+			var sz: Array = def.params.get("size", [0.5, 0.5, 0.5])
+			var size := Vector3(sz[0], sz[1], sz[2])
+			var pos := Vector3(free_pos_mm) / 1000.0 + Vector3(0, size.y * 0.5, 0)
+			out.append([Transform3D(Basis(Vector3.UP, deg_to_rad(float(yaw_deg))), pos), size])
+		StructureDef.Kind.PLOT:
+			var b := _bounds(def, cell, rot)
+			var lo: Vector3 = b[0]
+			var hi: Vector3 = b[1]
+			out.append([Transform3D(Basis.IDENTITY, Vector3((lo.x + hi.x) * 0.5, lo.y + 0.12, (lo.z + hi.z) * 0.5)),
+				Vector3(hi.x - lo.x - 0.1, 0.24, hi.z - lo.z - 0.1)])
+		_:
+			var b := _bounds(def, cell, rot)
+			var inset := Vector3(0.06, 0.0, 0.06)
+			out.append([Transform3D(Basis.IDENTITY, (b[0] + b[1]) * 0.5), b[1] - b[0] - inset * 2.0])
+	return out
+
+
+## 발자국(회전 반영)의 경계: [최소, 최대].
+static func _bounds(def: StructureDef, cell: Vector3i, rot: int) -> Array[Vector3]:
+	var lo := Vector3(INF, INF, INF)
+	var hi := Vector3(-INF, -INF, -INF)
+	for c in SimWorld.footprint_cells(def, cell, rot):
+		lo = lo.min(Vector3(c))
+		hi = hi.max(Vector3(c) + Vector3.ONE)
+	return [lo, hi]
+
+
 func _add(s: SimStructure) -> void:
 	if _nodes.has(s.id):
 		return
 	var root := Node3D.new()
 	add_child(root)
 	_nodes[s.id] = root
-	if s.kind == StructureDef.Kind.BELT:
-		for c in s.cells:
-			_box(root, s, Vector3(c) + Vector3(0.5, 0.1, 0.5), Vector3(1.0, 0.2, 1.0))
-		# 흐르는 방향을 알 수 있게 끝에 표시를 둔다.
-		var tip := Vector3(s.cells[-1]) + Vector3(0.5, 0.22, 0.5) + Vector3(SimWorld.DIRV[s.dir_out]) * 0.3
-		var marker := _box(root, s, tip, Vector3(0.3, 0.05, 0.3), false)
-		marker.material_override = _material(-1)
-		return
-	# 발자국(회전 반영)의 경계 상자를 그대로 상자로 그린다.
-	var lo := Vector3(INF, INF, INF)
-	var hi := Vector3(-INF, -INF, -INF)
-	for c in SimWorld.footprint_cells(s.def, s.cell, s.rot):
-		lo = lo.min(Vector3(c))
-		hi = hi.max(Vector3(c) + Vector3.ONE)
-	var inset := Vector3(0.06, 0.0, 0.06)
-	_box(root, s, (lo + hi) * 0.5, hi - lo - inset * 2.0)
-	if s.kind in [StructureDef.Kind.CRAFTER, StructureDef.Kind.STORAGE, StructureDef.Kind.GENERATOR]:
+	var top := Vector3.ZERO
+	for shape: Array in shapes_for(s.def, s.cell, s.rot, s.cells, s.free_pos, s.free_yaw):
+		_box(root, s, shape[0], shape[1])
+		var t: Transform3D = shape[0]
+		top = t.origin + Vector3(0, (shape[1] as Vector3).y * 0.5, 0)
+	match s.kind:
+		StructureDef.Kind.BELT:
+			# 흐르는 방향을 알 수 있게 끝에 표시를 둔다.
+			var tip := Vector3(s.cells[-1]) + Vector3(0.5, 0.22, 0.5) + Vector3(SimWorld.DIRV[s.dir_out]) * 0.3
+			var marker := _box(root, s, Transform3D(Basis.IDENTITY, tip), Vector3(0.3, 0.05, 0.3), false)
+			marker.material_override = _material(-1)
+		StructureDef.Kind.PLOT:
+			# 작물: 자라는 만큼 커진다(_process에서 갱신).
+			var plant := MeshInstance3D.new()
+			var mesh := CylinderMesh.new()
+			mesh.top_radius = 0.05
+			mesh.bottom_radius = 0.45
+			mesh.height = 1.0
+			plant.mesh = mesh
+			plant.material_override = _material(-2)
+			plant.position = top
+			plant.visible = false
+			root.add_child(plant)
+			_plants[s.id] = plant
+		StructureDef.Kind.DECOR:
+			if s.def.params.get("light", false):
+				var light := OmniLight3D.new()
+				light.light_color = Color(1.0, 0.85, 0.6)
+				light.omni_range = 9.0
+				light.light_energy = 1.5
+				light.position = top + Vector3(0, 0.2, 0)
+				root.add_child(light)
+	if s.kind in [StructureDef.Kind.CRAFTER, StructureDef.Kind.STORAGE, StructureDef.Kind.GENERATOR,
+			StructureDef.Kind.PLOT, StructureDef.Kind.WORKBENCH]:
 		var label := Label3D.new()
 		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		label.pixel_size = 0.005
 		label.font_size = 36
 		label.outline_size = 10
-		label.position = Vector3((lo.x + hi.x) * 0.5, hi.y + 0.6, (lo.z + hi.z) * 0.5)
+		label.position = top + Vector3(0, 0.6 if s.kind != StructureDef.Kind.PLOT else 1.5, 0)
+		if s.kind == StructureDef.Kind.WORKBENCH:
+			label.text = "작업대"
 		root.add_child(label)
 		_labels[s.id] = label
 
@@ -103,20 +186,21 @@ func _remove(id: int) -> void:
 		_nodes[id].queue_free()
 		_nodes.erase(id)
 		_labels.erase(id)
+		_plants.erase(id)
 
 
-func _box(root: Node3D, s: SimStructure, center: Vector3, size: Vector3, solid: bool = true) -> MeshInstance3D:
+func _box(root: Node3D, s: SimStructure, xform: Transform3D, size: Vector3, solid: bool = true) -> MeshInstance3D:
 	var mesh := BoxMesh.new()
 	mesh.size = size
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
 	mi.material_override = _material(s.kind)
 	if not solid:
-		mi.position = center
+		mi.transform = xform
 		root.add_child(mi)
 		return mi
 	var body := StaticBody3D.new()
-	body.position = center
+	body.transform = xform
 	body.set_meta(&"structure_id", s.id)
 	var shape := BoxShape3D.new()
 	shape.size = size
@@ -183,3 +267,18 @@ func _process(_delta: float) -> void:
 				_labels[id].text = "보관 %d" % total
 			StructureDef.Kind.GENERATOR:
 				_labels[id].text = "연료 %d%s" % [s.fuel_count, " · 연소 중" if s.burn_left > 0 else ""]
+			StructureDef.Kind.PLOT:
+				var plant: MeshInstance3D = _plants.get(id)
+				if s.crop < 0:
+					_labels[id].text = ""
+					if plant != null:
+						plant.visible = false
+					continue
+				var crop := sim.db.crops[s.crop]
+				var grown := clampf(float(s.growth) / crop.grow_ticks, 0.0, 1.0)
+				_labels[id].text = "수확 가능" if grown >= 1.0 else "%d%%%s" % [int(grown * 100.0), " · 물 줌" if s.watered else ""]
+				if plant != null:
+					plant.visible = true
+					var h := lerpf(0.15, 1.2, grown)
+					plant.scale = Vector3(lerpf(0.3, 1.0, grown), h, lerpf(0.3, 1.0, grown))
+					plant.position.y = float(s.cell.y) + 0.24 + h * 0.5

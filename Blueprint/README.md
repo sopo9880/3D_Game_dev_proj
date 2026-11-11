@@ -1,4 +1,4 @@
-# Edenfall Blueprint v0.5
+# Edenfall Blueprint v0.6
 
 이 폴더는 Edenfall의 **단일 기준 문서(single source of truth)** 다. 초기 기획(v0.1)을 검토해 모순을 없애고, 결정되지 않았던 부분을 결정하고, 1인 개발로 실제 만들 수 있는 크기로 다시 잘랐다.
 
@@ -16,6 +16,10 @@
 | [06_roadmap.md](06_roadmap.md) | 마일스톤, 통과 기준, 위험 요소 | 다음에 무엇을 할지 볼 때 |
 | [07_decisions.md](07_decisions.md) | 결정 기록, 아직 열려 있는 질문 | 왜 이렇게 했는지 궁금할 때 |
 | [08_dev_process.md](08_dev_process.md) | 버전 규칙, 테스트 실행, 테스트 빌드 받는 법, 의견 주는 법 | 빌드를 받거나 버전을 올릴 때 |
+
+## v0.6에서 바뀐 것
+
+M2(건축과 공장)를 구현하면서 정해진 것을 반영했다: 조각별 격자 사용 방식과 받침 규칙([02](02_systems.md)), 실제 세이브 구조와 복구 절차([03](03_data_model.md)), 요청/이벤트 통일([04](04_architecture.md)), 결정 D-044~D-049, M2 결과와 알려진 한계([06](06_roadmap.md)).
 
 ## v0.5에서 바뀐 것
 

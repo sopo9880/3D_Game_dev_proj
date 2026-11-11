@@ -75,6 +75,20 @@ func _process(delta: float) -> void:
 		node.global_position += vel * delta
 
 
+## 지금 동료를 일으킬 수 있는 자리인가(그렇다면 E는 일으키기에 쓴다).
+func reviving() -> bool:
+	return _revive_target() >= 0
+
+
+func _revive_target() -> int:
+	for peer: int in Combat.vitals:
+		if peer == Net.my_id() or Combat.vitals[peer].state != Combat.PState.DOWNED or not World.positions.has(peer):
+			continue
+		if World.positions[peer].distance_to(player.global_position) <= CombatRules.REVIVE_RANGE:
+			return peer
+	return -1
+
+
 func _update_revive(delta: float) -> void:
 	var target := -1
 	for peer: int in Combat.vitals:

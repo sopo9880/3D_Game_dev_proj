@@ -6,6 +6,7 @@ extends RefCounted
 signal reload_started
 signal reload_step       ## 한 발씩 장전하는 무기에서 한 발이 들어갈 때
 signal reload_finished
+signal ammo_wanted(count: int)   ## 외부 탄약 모드: 이만큼 채워 달라(소지품에서 꺼내 grant로 돌려준다)
 
 var def: WeaponDef
 var mag: int
@@ -14,6 +15,9 @@ var reload_left: float = 0.0
 var bloom: float = 0.0
 var burst_index: int = 0
 var since_shot: float = 99.0
+## 켜면 재장전이 탄창을 직접 채우지 않고 ammo_wanted로 요청한다(월드의 소지품에서 차감).
+var external_ammo: bool = false
+var _pending: int = 0            ## 요청하고 아직 받지 못한 탄약
 
 
 func _init(weapon: WeaponDef) -> void:
@@ -39,15 +43,37 @@ func update(delta: float) -> void:
 		reload_left -= delta
 		if reload_left <= 0.0:
 			if def.reload_per_shell:
-				mag = mini(mag + 1, def.mag)
+				_fill(1)
 				reload_step.emit()
-				if mag < def.mag:
+				if mag + _pending < def.mag:
 					reload_left += def.reload_time
 					return
 			else:
-				mag = def.mag
+				_fill(def.mag - mag)
 			reload_left = 0.0
 			reload_finished.emit()
+
+
+func _fill(count: int) -> void:
+	if count <= 0:
+		return
+	if external_ammo:
+		_pending += count
+		ammo_wanted.emit(count)
+	else:
+		mag = mini(mag + count, def.mag)
+
+
+## 외부 탄약 모드: 요청했던 탄약 중 실제로 받은 만큼 채운다. 모자라게 받았으면 장전을 멈춘다.
+func grant(count: int, asked: int) -> void:
+	_pending = maxi(_pending - asked, 0)
+	mag = mini(mag + count, def.mag)
+	if count < asked:
+		reload_left = 0.0
+
+
+func uses_inventory_ammo() -> bool:
+	return external_ammo and def.ammo_item != &"" and not def.infinite_ammo
 
 
 func can_fire() -> bool:

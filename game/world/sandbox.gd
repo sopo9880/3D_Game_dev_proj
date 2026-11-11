@@ -23,6 +23,8 @@ var _nettest_was_downed: bool = false
 var _node_markers: Node3D
 var yard: CombatYard
 var combat_view: CombatView
+var build: BuildMode
+var panel: StructurePanel
 
 
 func _ready() -> void:
@@ -44,6 +46,7 @@ func _ready() -> void:
 	player = PlayerController.new()
 	player.sfx = sfx
 	player.fx = fx
+	player.use_world_ammo = true
 	add_child(player)
 	# 전에 있던 자리에서 시작한다. 처음이면 접속한 순서대로 조금씩 떨어진 자리.
 	var spawn := World.saved_spawn(World.my_key()) if Net.is_host() else World.my_spawn
@@ -63,12 +66,20 @@ func _ready() -> void:
 		"WASD 이동 · Shift 달리기 · Space 점프 (턱 앞에서 앞으로 밀면 올라타기) · Ctrl 앉기/슬라이딩",
 		"좌클릭 사격 · 우클릭 조준 · R 재장전 · 1/2/3 무기 · G 수류탄 · E 동료 일으키기",
 		"벽 옆에서 달리며 점프 = 벽 달리기, 다시 점프 = 벽 차기 · 뒤쪽(+Z) 담장 안이 전투 구역",
-		"B 저장소 설치 · N 기준 생산 라인 건설 · X 조준한 구조물 철거 · Esc 마우스 풀기",
+		"B 건축 모드 (휠 선택 · R 회전 · 좌클릭 설치 · X 철거 · F 같은 것 고르기 · Z 되돌리기) · E 설비 열기",
+		"N 기준 생산 라인 한 벌(개발용, 호스트) · Esc 마우스 풀기",
 		"F6 저장 · F10 저장하고 나가기 (5분마다 자동 저장)",
 	]
 	layer.add_child(hud)
+	hud.collapse_help()
 	player.hit_confirmed.connect(hud.on_hit)
 
+	build = BuildMode.new()
+	build.player = player
+	build.hud = hud
+	add_child(build)
+	panel = StructurePanel.new()
+	layer.add_child(panel)
 	combat_view = CombatView.new()
 	combat_view.player = player
 	combat_view.hud = hud
@@ -98,6 +109,10 @@ func _ready() -> void:
 			_yard_shot(arg.trim_prefix("--yardshot="))
 		elif arg.begins_with("--savetest="):
 			_save_test(arg.trim_prefix("--savetest="))
+		elif arg.begins_with("--buildshot="):
+			_build_shot(arg.trim_prefix("--buildshot="))
+		elif arg == "--buildtest":
+			_build_test()
 		elif arg == "--combattest":
 			_combat_test()
 		elif arg.begins_with("--shot="):
@@ -114,6 +129,11 @@ func _on_disconnected(reason: String) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if panel.visible:
+		if event.is_action_pressed(&"interact") or event.is_action_pressed(&"pause"):
+			_close_panel()
+			get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed(&"pause"):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
@@ -133,19 +153,26 @@ func _unhandled_input(event: InputEvent) -> void:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED if full else DisplayServer.WINDOW_MODE_FULLSCREEN)
 	elif not player.is_active():
 		return
-	elif event.is_action_pressed(&"dev_build_box"):
+	elif event.is_action_pressed(&"interact") and not build.active and not combat_view.reviving():
 		var aim := _aim()
-		if not aim.is_empty():
-			var p: Vector3 = aim["position"] + aim["normal"] * 0.05
-			World.request_place(&"storage", Vector3i(floori(p.x), maxi(floori(p.y), 0), floori(p.z)), 0)
+		if not aim.is_empty() and (aim["position"] as Vector3).distance_to(player.global_position) < 6.0:
+			open_panel(StructureView.structure_id_of(aim["collider"]))
 	elif event.is_action_pressed(&"dev_build_line"):
 		build_next_line()
-	elif event.is_action_pressed(&"dev_remove"):
-		var aim := _aim()
-		if not aim.is_empty():
-			var id := StructureView.structure_id_of(aim["collider"])
-			if id != 0:
-				World.request_remove(id)
+
+
+func open_panel(id: int) -> bool:
+	if not panel.open(id):
+		return false
+	player.input_enabled = false
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	return true
+
+
+func _close_panel() -> void:
+	panel.close()
+	player.input_enabled = true
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
 func _aim() -> Dictionary:
@@ -283,6 +310,12 @@ func _nettest_tick(tick: int) -> void:
 		"client":
 			if since == 30:
 				World.request_place(&"storage", Vector3i(-20, 0, -10), 0)
+				# 클라이언트가 보내는 다른 종류의 요청들: 장식 놓기, 탄약 쓰기, 밭 만들고 심기.
+				World.request_place_free(&"lamp", player.global_position + Vector3(1, 0, 1), 30)
+				World.request("consume", ["rifle_ammo", 10])
+				World.request_place(&"plot", Vector3i(4, 0, 4), 0)
+			elif since == 40:
+				World.request("plant", [World.sim.occupancy.get(Vector3i(4, 0, 4), 0), "glowleaf_seed"])
 			elif since >= 110 and since < 130 and since % 2 == 0 and not Combat.enemies.is_empty():
 				# 적을 맞혔다고 보고한다(체력 40, 먼 거리 몸통 7.2 → 6발).
 				Combat.begin_shot(&"rifle", player.global_position, Vector3(0, 1, 68))
@@ -501,3 +534,213 @@ func _save_test(mode: String) -> void:
 			Save.world_id, World.sim.tick_count, World.sim.state_hash(), World.sim.structures.size(),
 			p.x, p.z, player.yaw, World.my_count(&"iron_ingot")])
 		get_tree().quit(0)
+
+
+# ---------------------------------------------------------------------------
+# 건축·제작·밭·탄약 자동 점검 (혼자, 화면 없이): `godot --headless -- --single --buildtest`
+# ---------------------------------------------------------------------------
+
+func _build_test() -> void:
+	var errors: PackedStringArray = []
+	player.force_active = true
+	Combat.auto_spawn = false
+	Save.autosave_enabled = false
+	player.teleport(Vector3(6, 0.05, -6), 0.0)
+	await _wait(0.4)
+	var ingot := func() -> int: return World.my_count(&"iron_ingot")
+	if ingot.call() != 40:
+		errors.append("시작 주괴 %d (기대 40)" % ingot.call())
+	build.set_active(true)
+
+	# 바닥 → 벽 → 벽 위의 2층 바닥.
+	_place_at(&"floor", Vector3(1, 0, -6))
+	var floor1: int = World.sim.plates.get(Vector3i(0, 0, -8), 0)
+	if floor1 == 0 or ingot.call() != 38:
+		errors.append("바닥 설치 실패 (주괴 %d)" % ingot.call())
+	_place_at(&"wall", Vector3(1, 0, -7.9))
+	var wall_id: int = World.sim.walls.get(Vector4i(0, 0, -8, 0), 0)
+	if wall_id == 0:
+		errors.append("벽 설치 실패: %s" % build.reason)
+	build.select(&"floor")
+	build.update_target(Vector3(20, 4.0, -20), Vector3.UP, true)
+	if build.reason != "no_support":
+		errors.append("허공의 2층 바닥이 '%s' (기대 no_support)" % build.reason)
+	_place_at(&"floor", Vector3(1, 4.0, -7))
+	if not World.sim.plates.has(Vector3i(0, 4, -8)):
+		errors.append("벽 위 2층 바닥 설치 실패: %s" % build.reason)
+
+	# 설비 설치와 되돌리기: 비용이 빠졌다가 전액 돌아온다.
+	var before: int = ingot.call()
+	_place_at(&"smelter", Vector3(8.5, 0, -3.5))
+	if ingot.call() != before - 10 or build.undo_count() != 4:
+		errors.append("제련기 설치 후 주괴 %d, 되돌리기 %d개" % [ingot.call(), build.undo_count()])
+	build.undo()
+	if ingot.call() != before or World.sim.occupancy.has(Vector3i(7, 0, -5)):
+		errors.append("되돌리기 후 주괴 %d (기대 %d)" % [ingot.call(), before])
+	# 철거를 되돌리면 다시 선다.
+	build.remove(wall_id)
+	if World.sim.walls.has(Vector4i(0, 0, -8, 0)):
+		errors.append("벽 철거 실패")
+	build.undo()
+	if not World.sim.walls.has(Vector4i(0, 0, -8, 0)) or ingot.call() != before:
+		errors.append("철거 되돌리기 실패 (주괴 %d)" % ingot.call())
+
+	# 벨트: 두 번 클릭해 ㄱ자로.
+	build.select(&"belt")
+	build.update_target(Vector3(6.5, 0, -1.5), Vector3.UP, true)
+	build.confirm()
+	build.update_target(Vector3(9.5, 0, -0.5), Vector3.UP, true)
+	build.confirm()
+	var belt: SimStructure = World.sim.structures.get(World.sim.occupancy.get(Vector3i(9, 0, -1), 0))
+	if belt == null or belt.cells.size() != 5 or ingot.call() != before - 2:
+		errors.append("벨트 설치 실패: %s (주괴 %d)" % [build.reason, ingot.call()])
+
+	# 장식(자유 배치), 살 수 없는 것.
+	_place_at(&"lamp", Vector3(5.2, 0, -2.6))
+	if World.sim.decor_count != 1:
+		errors.append("등불 설치 실패: %s" % build.reason)
+	build.select(&"assembler")
+	build.update_target(Vector3(20, 0, -3), Vector3.UP, true)
+	if build.reason != "cannot_afford":
+		errors.append("정밀 부품 없이 조립기가 '%s' (기대 cannot_afford)" % build.reason)
+
+	# 작업대: 손 제작.
+	_place_at(&"workbench", Vector3(4.5, 0, -10.5))
+	var bench: int = World.sim.occupancy.get(Vector3i(3, 0, -12), 0)
+	build.set_active(false)
+	if not open_panel(bench):
+		errors.append("작업대 패널이 열리지 않음")
+	var ammo_before := World.my_count(&"rifle_ammo")
+	before = ingot.call()
+	panel.act("craft", ["make_rifle_ammo", 1])
+	if World.my_count(&"rifle_ammo") != ammo_before + 30 or ingot.call() != before - 1:
+		errors.append("탄약 제작 실패")
+	_close_panel()
+
+	# 밭: 심고, 물 주고, 수확.
+	build.set_active(true)
+	_place_at(&"plot", Vector3(8.5, 0, -8.5))
+	build.set_active(false)
+	var plot: SimStructure = World.sim.structures.get(World.sim.occupancy.get(Vector3i(7, 0, -9), 0))
+	if plot == null:
+		errors.append("밭 설치 실패: %s" % build.reason)
+	else:
+		open_panel(plot.id)
+		panel.act("plant", [plot.id, "glowleaf_seed"])
+		panel.act("water", [plot.id])
+		if plot.crop < 0 or not plot.watered or World.my_count(&"glowleaf_seed") != 3:
+			errors.append("심기/물 주기 실패")
+		plot.growth = Registry.db.crops[plot.crop].grow_ticks - 3   # 2분을 기다리지 않는다
+		await _wait(0.6)
+		panel.act("harvest", [plot.id])
+		if World.my_count(&"glowleaf") != 4 or World.sim.plot_state(plot) != "empty":
+			errors.append("수확 실패 (빛잎 %d)" % World.my_count(&"glowleaf"))
+		_close_panel()
+
+	# 발전기와 제련기를 손으로 돌린다: 광석을 넣고 주괴를 꺼낸다.
+	build.set_active(true)
+	_place_at(&"bio_generator", Vector3(12.5, 0, -6.5))
+	_place_at(&"smelter", Vector3(8.5, 0, -4.5))
+	build.set_active(false)
+	var gen: int = World.sim.occupancy.get(Vector3i(11, 0, -7), 0)
+	var smelter: int = World.sim.occupancy.get(Vector3i(7, 0, -6), 0)
+	if gen == 0 or smelter == 0:
+		errors.append("발전기/제련기 설치 실패: %s (주괴 %d)" % [build.reason, ingot.call()])
+	else:
+		World.grant(1, {"biofuel": 1, "iron_ore": 4})
+		open_panel(gen)
+		panel.act("insert", [gen, "biofuel", 9999])
+		_close_panel()
+		open_panel(smelter)
+		panel.act("insert", [smelter, "iron_ore", 9999])
+		before = ingot.call()
+		await _wait(9.0)
+		panel.act("take", [smelter, "iron_ingot", 9999])
+		_close_panel()
+		if ingot.call() != before + 4 or World.my_count(&"iron_ore") != 0:
+			errors.append("손 제련 실패: 주괴 %d → %d" % [before, ingot.call()])
+
+	# 탄약: 재장전하면 소지품에서 빠진다. 탄약이 없으면 장전되지 않는다.
+	player.equip_by_id(&"rifle")
+	await _wait(0.4)
+	ammo_before = World.my_count(&"rifle_ammo")
+	player.gun.mag = 5
+	player.try_reload()
+	await _wait(player.gun.def.reload_time + 0.4)
+	if player.gun.mag != 30 or World.my_count(&"rifle_ammo") != ammo_before - 25:
+		errors.append("재장전: 탄창 %d, 소지 탄약 %d → %d" % [player.gun.mag, ammo_before, World.my_count(&"rifle_ammo")])
+	World.request("consume", ["rifle_ammo", 1000])
+	player._ammo_asks.clear()
+	player.gun.mag = 0
+	player.try_reload()
+	await _wait(0.3)
+	if player.gun.is_reloading() or player.gun.mag != 0:
+		errors.append("탄약 없이 재장전됨")
+
+	# 너무 먼 설비는 쓸 수 없다.
+	player.teleport(Vector3(60, 0.05, 60), 0.0)
+	await _wait(0.3)
+	_last_reject = ""
+	World.request("take", [smelter, "iron_ingot", 1])
+	if _last_reject != "too_far":
+		errors.append("먼 설비 사용이 '%s' (기대 too_far)" % _last_reject)
+
+	# 자동 저장과 같은 경로(스레드에서 쓰기)로 저장해 본다.
+	var result: Array = []
+	Save.saved.connect(func(ok: bool, _m: String) -> void: result.append(ok), CONNECT_ONE_SHOT)
+	if not Save.save_now():
+		errors.append("비동기 저장을 시작하지 못함")
+	var waited := 0.0
+	while result.is_empty() and waited < 10.0:
+		await _wait(0.1)
+		waited += 0.1
+	if result != [true] or Save.store.read_manifest(Save.world_id).is_empty():
+		errors.append("비동기 저장 실패 (%s)" % str(result))
+
+	if errors.is_empty():
+		print("BUILDTEST OK (구조물 %d)" % World.sim.structures.size())
+	else:
+		for e in errors:
+			print("BUILDTEST FAIL: %s" % e)
+	get_tree().quit(0 if errors.is_empty() else 1)
+
+
+## 건축 모드에서 그 종류를 골라, 조준점이 pos(윗면)인 것처럼 설치한다.
+func _place_at(def_id: StringName, pos: Vector3) -> void:
+	build.select(def_id)
+	build.update_target(pos, Vector3.UP, true)
+	build.confirm()
+
+
+## 건축물이 있는 화면을 저장한다(렌더링 확인용).
+func _build_shot(path: String) -> void:
+	player.force_active = true
+	Combat.auto_spawn = false
+	player.teleport(Vector3(6, 0.05, 4), 0.0)
+	await _wait(0.4)
+	World.grant(1, {"iron_ingot": 200, "biofuel": 5})
+	build.set_active(true)
+	for x: float in [1.0, 5.0]:
+		_place_at(&"floor", Vector3(x, 0, -6))
+	_place_at(&"wall", Vector3(1, 0, -7.9))
+	_place_at(&"wall", Vector3(5, 0, -7.9))
+	build.rot = 1
+	_place_at(&"wall", Vector3(0.1, 0, -6))
+	build.rot = 0
+	_place_at(&"floor", Vector3(1, 4.0, -7))
+	_place_at(&"stairs", Vector3(9.5, 0, -6))
+	_place_at(&"plot", Vector3(12.5, 0, -1.5))
+	_place_at(&"workbench", Vector3(2.5, 0, -1.5))
+	_place_at(&"lamp", Vector3(5.5, 0.2, -5.5))
+	_place_at(&"table", Vector3(2.5, 0.2, -6))
+	_place_at(&"smelter", Vector3(6, 0, -5))
+	var plot: SimStructure = World.sim.structures.get(World.sim.occupancy.get(Vector3i(12, 0, -2), 0))
+	if plot != null:
+		World.request("plant", [plot.id, "glowleaf_seed"])
+		plot.growth = 900
+	build.select(&"storage")
+	player.pitch = deg_to_rad(-12.0)
+	await _wait(1.2)
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(path)
+	get_tree().quit()

@@ -90,6 +90,12 @@ jobs:
       - name: Combat test (enemies, hit validation, grenade, down and respawn)
         run: timeout 180 godot --headless -- --single --combattest
 
+      - name: Build test (build mode, costs, undo, crafting, farming, ammo)
+        run: timeout 180 godot --headless -- --single --saveroot=user://ci_build --buildtest
+
+      - name: Save and continue test
+        run: tools/save_test.sh
+
       - name: Smoke test the exported pack
         run: |
           set -euo pipefail

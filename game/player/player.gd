@@ -70,6 +70,8 @@ var ads_amount: float = 0.0
 var sliding: bool = false
 var mantling: bool = false
 var wallrunning: bool = false
+var use_world_ammo: bool = false    ## 켜면 재장전이 월드 소지품의 탄약을 쓴다(사격장에서는 끈다)
+var suppress_combat: bool = false  ## 건축 모드 등: 사격과 무기 교체를 막는다
 var downed: bool = false           ## 쓰러짐: 움직이거나 쏠 수 없다(전투 시스템이 켜고 끈다)
 var crouching: bool = false
 
@@ -105,6 +107,7 @@ var _fov_smooth: float = 90.0
 var _roll: float = 0.0
 var _switch_lock: float = 0.0
 var _empty_clicked: bool = false
+var _ammo_asks: Array = []          ## 탄약 요청 대기열: [무기, 수량]
 var _mantle_t: float = 0.0
 var _wall_normal: Vector3 = Vector3.ZERO
 var _wall_time: float = 0.0
@@ -149,6 +152,7 @@ func _ready() -> void:
 
 	for key: String in PROFILE_KEYS:
 		_base_values[key] = get(key)
+	World.consumed.connect(_on_ammo_consumed)
 	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://data/profiles.json"))
 	profiles = parsed if parsed is Array else []
 	apply_profile(0)
@@ -179,9 +183,38 @@ func apply_profile(index: int) -> void:
 		g.reload_started.connect(func() -> void: sfx.play(&"reload", 0.05))
 		g.reload_step.connect(func() -> void: sfx.play(&"shell", 0.08))
 		g.reload_finished.connect(func() -> void: sfx.play(&"reload", 0.05))
+		g.external_ammo = use_world_ammo and def.ammo_item != &"" and not def.infinite_ammo
+		g.ammo_wanted.connect(_on_ammo_wanted.bind(g))
 		guns.append(g)
 	_equip(0)
 	profile_changed.emit(profile_name())
+
+
+func _on_ammo_wanted(count: int, g: Gun) -> void:
+	_ammo_asks.append([g, count])
+	World.request("consume", [String(g.def.ammo_item), count])
+
+
+## 호스트가 내 탄약을 차감했다. 요청한 순서대로 온다.
+func _on_ammo_consumed(key: String, _item: StringName, count: int) -> void:
+	if key != World.my_key() or _ammo_asks.is_empty():
+		return
+	var ask: Array = _ammo_asks.pop_front()
+	(ask[0] as Gun).grant(count, ask[1])
+
+
+## 지금 든 무기의 남은 탄약(소지품). 탄약이 필요 없는 무기는 -1.
+func reserve_ammo() -> int:
+	return World.my_count(gun.def.ammo_item) if gun.uses_inventory_ammo() else -1
+
+
+func try_reload() -> void:
+	if gun.uses_inventory_ammo() and World.my_count(gun.def.ammo_item) <= 0:
+		if not _empty_clicked:
+			sfx.play(&"empty")
+			_empty_clicked = true
+		return
+	gun.start_reload()
 
 
 func profile_name() -> String:
@@ -198,12 +231,16 @@ func _unhandled_input(event: InputEvent) -> void:
 		yaw -= motion.relative.x * k
 		pitch = clampf(pitch - motion.relative.y * k, deg_to_rad(-89.0), deg_to_rad(89.0))
 		viewmodel.add_sway(motion.relative)
+	elif suppress_combat:
+		if event.is_action_pressed(&"jump"):
+			_jump_buffer = 0.12
 	elif event.is_action_pressed(&"fire"):
 		_fire_buffer = 0.12
 	elif event.is_action_pressed(&"jump"):
 		_jump_buffer = 0.12
 	elif event.is_action_pressed(&"reload"):
-		gun.start_reload()
+		_empty_clicked = false
+		try_reload()
 	elif event.is_action_pressed(&"weapon_1"):
 		_equip(0)
 	elif event.is_action_pressed(&"weapon_2"):
@@ -502,10 +539,10 @@ func _process(delta: float) -> void:
 	_switch_lock = maxf(_switch_lock - delta, 0.0)
 	_fire_buffer = maxf(_fire_buffer - delta, 0.0)
 
-	var want_ads := active and Input.is_action_pressed(&"aim") and not gun.is_reloading() and _switch_lock <= 0.0
+	var want_ads := active and not suppress_combat and Input.is_action_pressed(&"aim") and not gun.is_reloading() and _switch_lock <= 0.0
 	ads_amount = move_toward(ads_amount, 1.0 if want_ads else 0.0, delta / maxf(gun.def.ads_time, 0.01))
 
-	if active and _switch_lock <= 0.0:
+	if active and _switch_lock <= 0.0 and not suppress_combat:
 		var want_fire := Input.is_action_pressed(&"fire") if gun.def.auto else _fire_buffer > 0.0
 		if want_fire:
 			var guard := 0
@@ -516,10 +553,10 @@ func _process(delta: float) -> void:
 					_fire_buffer = 0.0
 					break
 			if gun.mag <= 0 and not gun.is_reloading():
+				try_reload()
 				if not _empty_clicked:
 					sfx.play(&"empty")
 					_empty_clicked = true
-				gun.start_reload()
 		else:
 			_empty_clicked = false
 
