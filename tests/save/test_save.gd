@@ -128,3 +128,18 @@ func test_format_1_fixture_migrates_and_runs() -> void:
 func test_unknown_or_future_sim_format_is_rejected() -> void:
 	check(SaveMigrations.migrate_sim({"format": 99}).is_empty(), "미래 형식")
 	check(SaveMigrations.migrate_sim({}).is_empty(), "형식 표시 없음")
+
+
+## 형식 2(v0.3.0, 건축 구역이 없던 때)의 세이브도 그대로 불러온다.
+func test_format_2_fixture_migrates_with_everything_intact() -> void:
+	var old: Variant = bytes_to_var(FileAccess.get_file_as_bytes("res://tests/fixtures/sim_format_2.bin"))
+	check(old is Dictionary and int((old as Dictionary).get("format", 0)) == 2, "형식 2 샘플")
+	var w := SimWorld.from_dict(db, SaveMigrations.migrate_sim(old))
+	check(w != null, "불러오기")
+	eq(w.structures.size(), 18, "구조물 18개")
+	eq(w.inv_count("ann", db.item_index(&"glowleaf_seed")), 3, "소지품")
+	eq(w.decor_count, 1, "장식")
+	check(w.plates.has(Vector3i(40, 4, 0)), "2층 바닥")
+	eq(w.plot_state(w.plots[0]), "growing", "자라던 작물")
+	check(w.build_zones.is_empty(), "구역이 없으면 전체가 평지")
+	eq(w.can_place(&"storage", Vector3i(100, 0, 100), 0), "", "어디든 지을 수 있다")

@@ -26,6 +26,8 @@ const MAX_BELT_CELLS := 256
 const USE_RANGE := 10.0          ## 구조물을 쓰려면 이 거리 안에 있어야 한다
 const MAX_PLAYER_SPEED := 40.0   ## m/s. 이보다 빠른 이동 보고는 무시한다.
 ## 개발용 월드의 광맥 자리(기준 생산 라인의 원점). 실제 맵이 생기면 맵 데이터로 대체한다.
+## 개발용 월드의 건축 구역: [x, z, 폭, 깊이, 지면 높이]. 정원 평지와 3m 높은 단 하나.
+const DEV_BUILD_ZONES: Array[Array] = [[-44, -64, 88, 76, 0], [48, -40, 28, 28, 3]]
 const DEV_LINE_ORIGINS: Array[Vector3i] = [
 	Vector3i(-24, 0, -45), Vector3i(-8, 0, -45), Vector3i(8, 0, -45), Vector3i(24, 0, -45),
 ]
@@ -53,6 +55,8 @@ var _last_player_time: Dictionary[int, float] = {}
 func start_new() -> void:
 	sim = SimWorld.new(Registry.db)
 	saved_positions = {}
+	for z: Array in DEV_BUILD_ZONES:
+		sim.add_build_zone(z[0], z[1], z[2], z[3], z[4])
 	for origin in DEV_LINE_ORIGINS:
 		sim.add_node(origin + ReferenceLine.NODE_CELL, &"iron_ore")
 	sim.ensure_player(_player_key(1))

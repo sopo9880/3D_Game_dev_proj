@@ -3,7 +3,7 @@
 Godot 4.7.2로 만드는 3D 협동 게임. **가꾸고(힐링) · 자동화하고(공장) · 싸워서(FPS) · 세계를 복원한다.**
 1~8인 협동 PvE(싱글 플레이 가능), Steam(Windows 우선) 출시 목표.
 
-현재 버전 **0.3.0** — M2(건축과 공장) 완료, 다음은 M3(버티컬 슬라이스 완성).
+현재 버전 **0.3.1** — M2(건축과 공장) 완료, 다음은 M3(버티컬 슬라이스 완성).
 
 | 되어 있는 것 | 상태 |
 | --- | --- |
@@ -44,3 +44,4 @@ godot --headless -s tests/run_tests.gd
 3. [버티컬 슬라이스 명세](Blueprint/05_vertical_slice.md)
 4. [로드맵과 현재 진행 상황](Blueprint/06_roadmap.md)
 5. [버전 규칙과 테스트 빌드](Blueprint/08_dev_process.md)
+6. [건축 사용성과 디자인](Blueprint/09_building_design_plan.md)

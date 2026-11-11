@@ -7,7 +7,7 @@ extends RefCounted
 ## - 정수 연산만 쓰고, 순회 순서는 항상 구조물 ID 오름차순이나 미리 계산한 순서다.
 ## - 같은 상태에서 같은 횟수만큼 tick()을 부르면 항상 같은 결과가 나온다.
 
-const SAVE_FORMAT := 2
+const SAVE_FORMAT := 3
 const DIRV: Array[Vector3i] = [Vector3i(0, 0, -1), Vector3i(1, 0, 0), Vector3i(0, 0, 1), Vector3i(-1, 0, 0)]
 const GRID_BUCKET := 32
 
@@ -23,6 +23,10 @@ var plates: Dictionary[Vector3i, int] = {}
 ## 벽: 칸의 북쪽(w = 0) 또는 서쪽(w = 3) 모서리에 선다. 키는 (x, y, z, 방향), y는 벽의 밑.
 var walls: Dictionary[Vector4i, int] = {}
 var decor_count: int = 0
+var decors: Array[SimStructure] = []
+## 건축 가능 구역: 높이가 정해진 평평한 단. 각 항목은 [x, z, 폭, 깊이, 지면 높이].
+## 하나도 없으면 월드 전체가 높이 0의 평지다(테스트와 벤치마크).
+var build_zones: Array[PackedInt32Array] = []
 ## 플레이어 소지품: 플레이어 키 → (아이템 인덱스 → 수량). 월드 세이브에 함께 저장된다(D-013).
 var inventories: Dictionary[String, Dictionary] = {}
 
@@ -99,15 +103,43 @@ static func wall_edges(def: StructureDef, cell: Vector3i, rot: int) -> Array[Vec
 	return out
 
 
+const NO_GROUND := -1000000
+const DECOR_MIN_GAP_MM := 300
+
+func add_build_zone(x: int, z: int, width: int, depth: int, ground: int) -> void:
+	build_zones.append(PackedInt32Array([x, z, width, depth, ground]))
+
+
+## 그 자리의 지면 높이. 건축할 수 없는 땅이면 NO_GROUND.
+func ground_y(x: int, z: int) -> int:
+	if build_zones.is_empty():
+		return 0
+	for zone in build_zones:
+		if x >= zone[0] and x < zone[0] + zone[2] and z >= zone[1] and z < zone[1] + zone[3]:
+			return zone[4]
+	return NO_GROUND
+
+
+## 그 칸에 지을 수 있는 땅인가: 건축 구역 안이고, 지면보다 낮지 않고, 높이 한도 안이다.
+func _site(c: Vector3i) -> String:
+	var g := ground_y(c.x, c.z)
+	if g == NO_GROUND:
+		return "not_buildable"
+	if c.y < g or c.y > g + db.max_build_height:
+		return "out_of_bounds"
+	return ""
+
+
 ## 그 칸 바로 아래가 받쳐 주는가: 지면이거나, 바닥판이 깔려 있거나, 다른 구조물이 있다.
 func _cell_supported(c: Vector3i) -> bool:
-	return c.y == 0 or plates.has(c) or occupancy.has(c + Vector3i(0, -1, 0))
+	return c.y == ground_y(c.x, c.z) or plates.has(c) or occupancy.has(c + Vector3i(0, -1, 0))
 
 
 func _plate_supported(cells: Array[Vector3i]) -> bool:
 	var y := cells[0].y
-	if y == 0:
-		return true
+	for c in cells:
+		if y == ground_y(c.x, c.z):
+			return true
 	var own: Dictionary[Vector3i, bool] = {}
 	for c in cells:
 		own[c] = true
@@ -127,12 +159,20 @@ func _plate_supported(cells: Array[Vector3i]) -> bool:
 
 
 func _wall_supported(e: Vector4i) -> bool:
-	if e.y == 0 or walls.has(Vector4i(e.x, e.y - WALL_HEIGHT, e.z, e.w)):
+	if walls.has(Vector4i(e.x, e.y - WALL_HEIGHT, e.z, e.w)):
 		return true
-	# 모서리 양쪽 칸 중 한 곳에 바닥판이 있다.
+	# 모서리 양쪽 칸 중 한 곳이 지면이거나 바닥판이 있다.
 	var here := Vector3i(e.x, e.y, e.z)
 	var other := here + (Vector3i(0, 0, -1) if e.w == 0 else Vector3i(-1, 0, 0))
-	return plates.has(here) or plates.has(other)
+	return plates.has(here) or plates.has(other) or e.y == ground_y(here.x, here.z) or e.y == ground_y(other.x, other.z)
+
+
+## 벽 모서리에 지을 수 있는가: 양쪽 칸 중 하나라도 건축 구역이면 된다.
+func _wall_site(e: Vector4i) -> String:
+	var here := Vector3i(e.x, e.y, e.z)
+	var other := here + (Vector3i(0, 0, -1) if e.w == 0 else Vector3i(-1, 0, 0))
+	var a := _site(here)
+	return a if a == "" else _site(other)
 
 
 ## 설치할 수 없으면 이유를, 가능하면 빈 문자열을 돌려준다.
@@ -145,14 +185,14 @@ func can_place(def_id: StringName, cell: Vector3i, rot: int, check_support: bool
 		return "use_place_belt"
 	if def.kind == StructureDef.Kind.DECOR:
 		return "use_place_free"
-	if cell.y < 0 or cell.y > db.max_build_height:
-		return "out_of_bounds"
 	match def.kind:
 		StructureDef.Kind.FLOOR:
 			var cells := plate_cells(def, cell)
 			for c in cells:
 				if plates.has(c):
 					return "occupied"
+				if check_support and _site(c) != "":
+					return _site(c)
 			if check_support and not _plate_supported(cells):
 				return "no_support"
 			return ""
@@ -161,6 +201,8 @@ func can_place(def_id: StringName, cell: Vector3i, rot: int, check_support: bool
 			for e in wall_edges(def, cell, rot):
 				if walls.has(e):
 					return "occupied"
+				if check_support and _wall_site(e) != "":
+					return _wall_site(e)
 				supported = supported or _wall_supported(e)
 			if check_support and not supported:
 				return "no_support"
@@ -170,6 +212,8 @@ func can_place(def_id: StringName, cell: Vector3i, rot: int, check_support: bool
 	for c in footprint_cells(def, cell, rot):
 		if occupancy.has(c):
 			return "occupied"
+		if check_support and _site(c) != "":
+			return _site(c)
 		if nodes.has(c):
 			has_node = true
 		if c.y == cell.y and not _cell_supported(c):
@@ -224,10 +268,17 @@ func can_place_free(def_id: StringName, pos_mm: Vector3i) -> String:
 	var def: StructureDef = db.structures.get(def_id)
 	if def == null or def.kind != StructureDef.Kind.DECOR:
 		return "unknown_structure"
-	if pos_mm.y < -1000 or pos_mm.y > (db.max_build_height + WALL_HEIGHT) * 1000:
+	var g := ground_y(floori(pos_mm.x / 1000.0), floori(pos_mm.z / 1000.0))
+	if g == NO_GROUND:
+		return "not_buildable"
+	if pos_mm.y < g * 1000 - 100 or pos_mm.y > (g + db.max_build_height + WALL_HEIGHT) * 1000:
 		return "out_of_bounds"
 	if decor_count >= db.max_decor:
 		return "too_many"
+	# 다른 장식과 거의 같은 자리에는 놓을 수 없다.
+	for d in decors:
+		if (d.free_pos - pos_mm).length_squared() < DECOR_MIN_GAP_MM * DECOR_MIN_GAP_MM:
+			return "occupied"
 	return ""
 
 
@@ -239,6 +290,7 @@ func place_free(def_id: StringName, pos_mm: Vector3i, yaw_deg: int, by: String =
 	s.free_pos = pos_mm
 	s.free_yaw = posmod(yaw_deg, 360)
 	decor_count += 1
+	decors.append(s)
 	return s
 
 
@@ -253,8 +305,8 @@ func can_place_belt(path: Array[Vector3i], dir: int = -1, check_support: bool = 
 	for i in path.size():
 		if occupancy.has(path[i]) or seen.has(path[i]):
 			return "occupied"
-		if path[i].y < 0 or path[i].y > db.max_build_height:
-			return "out_of_bounds"
+		if check_support and _site(path[i]) != "":
+			return _site(path[i])
 		if check_support and not _cell_supported(path[i]):
 			return "no_support"
 		seen[path[i]] = true
@@ -305,7 +357,7 @@ func remove(id: int) -> Variant:
 			for c in footprint_cells(s.def, s.cell, s.rot):
 				occupancy.erase(c)
 	structures.erase(id)
-	for list: Array[SimStructure] in [crafters, generators, storages, junctions, belts, providers, plots]:
+	for list: Array[SimStructure] in [crafters, generators, storages, junctions, belts, providers, plots, decors]:
 		list.erase(s)
 	_dirty = true
 	return contents
@@ -1015,6 +1067,7 @@ func to_dict() -> Dictionary:
 	return {
 		"format": SAVE_FORMAT, "tick": tick_count, "next_id": next_id,
 		"palette": palette, "nodes": node_rows, "structures": rows, "inventories": inv_rows,
+		"zones": build_zones.duplicate(),
 	}
 
 
@@ -1035,6 +1088,8 @@ static func from_dict(content: ContentDB, d: Dictionary) -> SimWorld:
 	var remap := PackedInt32Array()
 	for id: String in d["palette"]:
 		remap.append(content.item_index(StringName(id)))
+	for zone: PackedInt32Array in d.get("zones", []):
+		w.build_zones.append(zone)
 	for n: Array in d["nodes"]:
 		w.nodes[Vector3i(int(n[0]), int(n[1]), int(n[2]))] = remap[int(n[3])]
 	for row: Dictionary in d["structures"]:

@@ -119,6 +119,37 @@ static func shapes_for(def: StructureDef, cell: Vector3i, rot: int, belt_cells: 
 	return out
 
 
+const PORT_COLORS: Array[Color] = [Color(0.3, 0.6, 1.0), Color(1.0, 0.6, 0.2), Color(0.75, 0.5, 1.0)]  # 입력, 출력, 겸용
+
+## 포트 표시들: [[Transform3D, 입출력 종류], ...]. 포트가 있는 면 바깥에 화살표처럼 놓인다.
+static func port_markers(def: StructureDef, cell: Vector3i, rot: int) -> Array:
+	var out: Array = []
+	for i in def.port_cells.size():
+		var dir := (def.port_dirs[i] + rot) & 3
+		var port_cell := cell + SimWorld.rotate_cell(def.port_cells[i], rot)
+		var outward := Vector3(SimWorld.DIRV[dir])
+		var pos := Vector3(port_cell) + Vector3(0.5, 0.45, 0.5) + outward * 0.62
+		# 화살표가 물건이 흐르는 방향을 가리킨다: 출력은 바깥으로, 입력은 안으로.
+		var flow := outward if def.port_ios[i] != StructureDef.PortIO.IN else -outward
+		out.append([Transform3D(Basis.looking_at(flow, Vector3.UP), pos), def.port_ios[i]])
+	return out
+
+
+static func port_marker_node(marker: Array) -> MeshInstance3D:
+	var mesh := PrismMesh.new()
+	mesh.size = Vector3(0.5, 0.45, 0.12)
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = PORT_COLORS[marker[1]]
+	mi.material_override = mat
+	# 프리즘의 꼭짓점(+Y)을 흐름 방향(-Z)으로 눕힌다.
+	mi.transform = (marker[0] as Transform3D) * Transform3D(Basis(Vector3.RIGHT, -PI * 0.5), Vector3.ZERO)
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return mi
+
+
 ## 발자국(회전 반영)의 경계: [최소, 최대].
 static func _bounds(def: StructureDef, cell: Vector3i, rot: int) -> Array[Vector3]:
 	var lo := Vector3(INF, INF, INF)
@@ -140,6 +171,9 @@ func _add(s: SimStructure) -> void:
 		_box(root, s, shape[0], shape[1])
 		var t: Transform3D = shape[0]
 		top = t.origin + Vector3(0, (shape[1] as Vector3).y * 0.5, 0)
+	if s.kind != StructureDef.Kind.JUNCTION:
+		for marker: Array in port_markers(s.def, s.cell, s.rot):
+			root.add_child(port_marker_node(marker))
 	match s.kind:
 		StructureDef.Kind.BELT:
 			# 흐르는 방향을 알 수 있게 끝에 표시를 둔다.

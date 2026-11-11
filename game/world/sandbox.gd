@@ -66,7 +66,8 @@ func _ready() -> void:
 		"WASD 이동 · Shift 달리기 · Space 점프 (턱 앞에서 앞으로 밀면 올라타기) · Ctrl 앉기/슬라이딩",
 		"좌클릭 사격 · 우클릭 조준 · R 재장전 · 1/2/3 무기 · G 수류탄 · E 동료 일으키기",
 		"벽 옆에서 달리며 점프 = 벽 달리기, 다시 점프 = 벽 차기 · 뒤쪽(+Z) 담장 안이 전투 구역",
-		"B 건축 모드 (휠 선택 · R 회전 · 좌클릭 설치 · X 철거 · F 같은 것 고르기 · Z 되돌리기) · E 설비 열기",
+		"B 건축 모드 (Tab 탭 · 휠 선택 · R 회전 · 좌클릭 설치 · X 철거 · F 같은 것 고르기 · Z 되돌리기 · Esc 닫기) · E 설비 열기",
+		"노란 띠 안쪽이 건축 구역. 화살표는 설비의 입력(파랑)과 출력(주황)",
 		"N 기준 생산 라인 한 벌(개발용, 호스트) · Esc 마우스 풀기",
 		"F6 저장 · F10 저장하고 나가기 (5분마다 자동 저장)",
 	]
@@ -242,6 +243,47 @@ func _refresh_nodes() -> void:
 		mi.material_override = mat
 		mi.position = Vector3(cell) + Vector3(0.5, 0.03, 0.5)
 		_node_markers.add_child(mi)
+	# 건축 구역: 높은 단은 실제 지형(발판과 경사로)으로, 가장자리는 띠로 표시한다.
+	for zone in World.sim.build_zones:
+		var zx := float(zone[0])
+		var zz := float(zone[1])
+		var w := float(zone[2])
+		var d := float(zone[3])
+		var gy := float(zone[4])
+		if gy > 0.0:
+			_zone_box(Vector3(zx + w * 0.5, gy * 0.5, zz + d * 0.5), Vector3(w, gy, d), Color(0.4, 0.46, 0.38), Vector3.ZERO, true)
+			var run := gy * 2.0
+			_zone_box(Vector3(zx - run * 0.5, gy * 0.5 - 0.15, zz + d * 0.5), Vector3(sqrt(run * run + gy * gy), 0.3, 6.0),
+				Color(0.5, 0.46, 0.4), Vector3(0, 0, rad_to_deg(atan2(gy, run))), true)
+		var edge := Color(0.95, 0.85, 0.35)
+		var y := gy + 0.03
+		_zone_box(Vector3(zx + w * 0.5, y, zz), Vector3(w, 0.06, 0.25), edge, Vector3.ZERO, false)
+		_zone_box(Vector3(zx + w * 0.5, y, zz + d), Vector3(w, 0.06, 0.25), edge, Vector3.ZERO, false)
+		_zone_box(Vector3(zx, y, zz + d * 0.5), Vector3(0.25, 0.06, d), edge, Vector3.ZERO, false)
+		_zone_box(Vector3(zx + w, y, zz + d * 0.5), Vector3(0.25, 0.06, d), edge, Vector3.ZERO, false)
+
+
+func _zone_box(pos: Vector3, size: Vector3, color: Color, rot_deg: Vector3, solid: bool) -> void:
+	var mesh := BoxMesh.new()
+	mesh.size = size
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	var mat := ShaderMaterial.new()
+	mat.shader = GRID_SHADER
+	mat.set_shader_parameter(&"base_color", color)
+	mat.set_shader_parameter(&"line_color", color.darkened(0.25))
+	mi.material_override = mat
+	var holder: Node3D = StaticBody3D.new() if solid else Node3D.new()
+	holder.position = pos
+	holder.rotation_degrees = rot_deg
+	holder.add_child(mi)
+	if solid:
+		var shape := BoxShape3D.new()
+		shape.size = size
+		var col := CollisionShape3D.new()
+		col.shape = shape
+		holder.add_child(col)
+	_node_markers.add_child(holder)
 
 
 func _build_environment() -> void:
@@ -677,6 +719,36 @@ func _build_test() -> void:
 	if player.gun.is_reloading() or player.gun.mag != 0:
 		errors.append("탄약 없이 재장전됨")
 
+	# 탭과 지붕, 포트 표시.
+	build.select(&"roof")
+	if build.selected().id != &"roof" or build.tab != 0:
+		errors.append("지붕 선택 실패")
+	build.next_tab()
+	if build.selected().tab != &"industry":
+		errors.append("탭 넘기기 실패: %s" % build.selected().tab)
+	if StructureView.port_markers(Registry.db.structures[&"smelter"], Vector3i.ZERO, 0).size() != 2 \
+			or StructureView.port_markers(Registry.db.structures[&"floor"], Vector3i.ZERO, 0).size() != 0:
+		errors.append("포트 표시 개수가 다름")
+
+	# 건축 구역: 구역 밖은 안 되고, 높은 단 위에서는 그 높이에 맞춰 놓인다.
+	World.grant(1, {"iron_ingot": 20})
+	build.set_active(true)
+	build.select(&"storage")
+	build.update_target(Vector3(46, 0, -20), Vector3.UP, true)
+	if build.reason != "not_buildable":
+		errors.append("구역 밖 설치가 '%s' (기대 not_buildable)" % build.reason)
+	_place_at(&"storage", Vector3(60.5, 3.0, -25.5))
+	if not World.sim.occupancy.has(Vector3i(59, 3, -27)):
+		errors.append("높은 단 위 저장소 설치 실패: %s" % build.reason)
+	_place_at(&"floor", Vector3(50, 3.0, -38))
+	if not World.sim.plates.has(Vector3i(48, 3, -40)):
+		errors.append("높은 단 위 바닥 설치 실패: %s" % build.reason)
+	_place_at(&"wall", Vector3(50, 3.0, -39.9))
+	_place_at(&"floor", Vector3(50, 7.0, -39))
+	if not World.sim.plates.has(Vector3i(48, 7, -40)):
+		errors.append("높은 단의 2층 바닥 설치 실패: %s" % build.reason)
+	build.set_active(false)
+
 	# 너무 먼 설비는 쓸 수 없다.
 	player.teleport(Vector3(60, 0.05, 60), 0.0)
 	await _wait(0.3)
@@ -698,7 +770,7 @@ func _build_test() -> void:
 		errors.append("비동기 저장 실패 (%s)" % str(result))
 
 	if errors.is_empty():
-		print("BUILDTEST OK (구조물 %d)" % World.sim.structures.size())
+		print("BUILDTEST OK (구조물 %d)" % World.sim.structures.size())  # 9 + 높은 단의 4
 	else:
 		for e in errors:
 			print("BUILDTEST FAIL: %s" % e)
@@ -738,7 +810,11 @@ func _build_shot(path: String) -> void:
 	if plot != null:
 		World.request("plant", [plot.id, "glowleaf_seed"])
 		plot.growth = 900
-	build.select(&"storage")
+	_place_at(&"storage", Vector3(56.5, 3.0, -20.5))
+	_place_at(&"floor", Vector3(62, 3.0, -30))
+	build.select(&"assembler")
+	if path.contains("terrace"):
+		player.teleport(Vector3(36, 0.05, -14), -1.9)
 	player.pitch = deg_to_rad(-12.0)
 	await _wait(1.2)
 	await RenderingServer.frame_post_draw

@@ -12,7 +12,7 @@ const KEYS: Dictionary[StringName, Array] = {
 	&"toggle_fullscreen": [KEY_F11], &"pause": [KEY_ESCAPE],
 	&"throw": [KEY_G], &"interact": [KEY_E],
 	&"save_game": [KEY_F6], &"save_and_exit": [KEY_F10],
-	&"build_toggle": [KEY_B], &"build_pick": [KEY_F], &"build_undo": [KEY_Z], &"dev_build_line": [KEY_N], &"dev_remove": [KEY_X],
+	&"build_toggle": [KEY_B], &"build_tab": [KEY_TAB], &"build_pick": [KEY_F], &"build_undo": [KEY_Z], &"dev_build_line": [KEY_N], &"dev_remove": [KEY_X],
 }
 const MOUSE: Dictionary[StringName, int] = {
 	&"fire": MOUSE_BUTTON_LEFT, &"aim": MOUSE_BUTTON_RIGHT,

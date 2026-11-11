@@ -13,6 +13,7 @@ static func migrate_sim(d: Dictionary) -> Dictionary:
 	while format < SimWorld.SAVE_FORMAT:
 		match format:
 			1: out = _sim_1_to_2(out)
+			2: out = _sim_2_to_3(out)
 			_: return {}
 		format = int(out.get("format", -1))
 	return out
@@ -23,4 +24,12 @@ static func migrate_sim(d: Dictionary) -> Dictionary:
 static func _sim_1_to_2(d: Dictionary) -> Dictionary:
 	d["inventories"] = []
 	d["format"] = 2
+	return d
+
+
+## 2 → 3 (v0.3.1): 건축 가능 구역이 월드 상태에 들어왔다. 옛 세이브는 구역이 없으므로
+## 전체가 높이 0의 평지로 취급되어, 지어 둔 것이 전부 그대로 유효하다.
+static func _sim_2_to_3(d: Dictionary) -> Dictionary:
+	d["zones"] = []
+	d["format"] = 3
 	return d
