@@ -3,8 +3,8 @@
 *.translation
 .import/
 # Builds
-build/
-export/
+/build/
+/export/
 *.pck
 *.exe
 # Steam
