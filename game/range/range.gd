@@ -72,6 +72,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED and not panel.visible:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed(&"toggle_profile"):
+		player.apply_profile(player.profile_index + 1)
+		player.reset_stats()
+		if panel.visible:
+			panel.rebuild()
 	elif event.is_action_pressed(&"toggle_help"):
 		hud.toggle_help()
 	elif event.is_action_pressed(&"reset_stats"):
@@ -341,6 +346,38 @@ func _selftest() -> void:
 	Input.action_release(&"jump")
 	if player.global_position.y - y0 < 0.5:
 		errors.append("점프 높이 %.2fm" % (player.global_position.y - y0))
+
+	# 전술 아레나 규칙: 달리기와 슬라이딩이 없고, 움직이면 탄이 크게 퍼지며, 소총 머리 한 발에 쓰러진다.
+	await _frames(20)
+	player.apply_profile(1)
+	await _frames(20)
+	if player.allow_sprint or player.allow_slide or player.guns.size() != 3:
+		errors.append("아레나 규칙이 적용되지 않음")
+	player.equip_by_id(&"rifle")
+	await _frames(20)
+	var still := player.gun.spread(false, 0.0, false)
+	var moving := player.gun.spread(false, 1.0, false)
+	if still > 0.5 or moving < still * 8.0:
+		errors.append("아레나 소총 탄퍼짐: 정지 %.2f, 이동 %.2f" % [still, moving])
+	target.reset()
+	await _frames(2)
+	_aim_at(target.global_position + Vector3(0, 1.69, 0))
+	await _frames(2)
+	player._shoot()
+	await _frames(2)
+	if target.visible:
+		errors.append("아레나 소총 머리 한 발에 쓰러지지 않음 (남은 체력 %.0f)" % target.hp)
+	start = player.global_position
+	Input.action_press(&"sprint")
+	Input.action_press(&"move_forward")
+	await get_tree().create_timer(1.0).timeout
+	Input.action_release(&"move_forward")
+	Input.action_release(&"sprint")
+	walked = player.global_position.distance_to(start)
+	if walked > 3.2:
+		errors.append("아레나에서 Shift는 조용히 걷기여야 함: 1초에 %.2fm" % walked)
+	player.apply_profile(0)
+	await _frames(5)
 
 	# 조정값 내보내기 형식.
 	var exported := panel.export_data()

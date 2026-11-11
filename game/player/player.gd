@@ -6,6 +6,7 @@ extends CharacterBody3D
 signal weapon_switched(gun: Gun)
 signal hit_confirmed(damage: float, head: bool, killed: bool)
 signal shot_fired
+signal profile_changed(profile_name: String)
 
 const STAND_HEIGHT := 1.8
 const CROUCH_HEIGHT := 1.1
@@ -39,6 +40,13 @@ var jump_velocity: float = 7.0
 var gravity: float = 20.0
 var slide_speed: float = 10.0
 var slide_friction: float = 7.0
+
+## 규칙 묶음(프로필)이 켜고 끄는 값. 협동과 아레나가 같은 컨트롤러를 다른 규칙으로 쓴다.
+var allow_sprint: bool = true
+var allow_slide: bool = true
+var shift_walks: bool = false      ## true면 Shift가 달리기 대신 조용히 걷기(절반 속도)
+var profiles: Array = []
+var profile_index: int = -1
 
 var input_enabled: bool = true
 var force_active: bool = false    ## 자동 점검용: 마우스가 잡혀 있지 않아도 입력을 받는다
@@ -82,6 +90,14 @@ var _fov_smooth: float = 90.0
 var _roll: float = 0.0
 var _switch_lock: float = 0.0
 var _empty_clicked: bool = false
+var _base_values: Dictionary[String, Variant] = {}
+
+## 프로필이 덮어쓸 수 있는 값. 감도와 시야각은 개인 설정이라 프로필이 건드리지 않는다.
+const PROFILE_KEYS: Array[String] = [
+	"allow_sprint", "allow_slide", "shift_walks",
+	"walk_speed", "sprint_speed", "crouch_speed", "ground_accel", "air_accel",
+	"jump_velocity", "gravity", "slide_speed", "slide_friction",
+]
 
 
 func _ready() -> void:
@@ -106,13 +122,45 @@ func _ready() -> void:
 	viewmodel = Viewmodel.new()
 	camera.add_child(viewmodel)
 
-	for def in WeaponDef.load_all("res://data/weapons.json"):
+	for key: String in PROFILE_KEYS:
+		_base_values[key] = get(key)
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://data/profiles.json"))
+	profiles = parsed if parsed is Array else []
+	apply_profile(0)
+
+
+## 규칙 묶음을 바꾼다: 이동 수치와 허용 동작, 무기 목록이 통째로 바뀐다.
+func apply_profile(index: int) -> void:
+	if profiles.is_empty():
+		push_error("data/profiles.json 을 읽을 수 없음")
+		return
+	profile_index = posmod(index, profiles.size())
+	var profile: Dictionary = profiles[profile_index]
+	for key: String in _base_values:
+		set(key, _base_values[key])
+	var movement: Dictionary = profile.get("movement", {})
+	for key: String in movement:
+		if not _base_values.has(key):
+			push_warning("프로필 %s: 모르는 항목 '%s'" % [profile.get("id"), key])
+		elif _base_values[key] is bool:
+			set(key, bool(movement[key]))
+		else:
+			set(key, float(movement[key]))
+	sliding = false
+	guns.clear()
+	gun = null
+	for def in WeaponDef.load_all(str(profile.get("weapons", "res://data/weapons.json"))):
 		var g := Gun.new(def)
 		g.reload_started.connect(func() -> void: sfx.play(&"reload", 0.05))
 		g.reload_step.connect(func() -> void: sfx.play(&"shell", 0.08))
 		g.reload_finished.connect(func() -> void: sfx.play(&"reload", 0.05))
 		guns.append(g)
 	_equip(0)
+	profile_changed.emit(profile_name())
+
+
+func profile_name() -> String:
+	return str((profiles[profile_index] as Dictionary).get("name", "?")) if profile_index >= 0 else "?"
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -192,7 +240,8 @@ func _physics_process(delta: float) -> void:
 	var wish := (Basis(Vector3.UP, yaw) * Vector3(input.x, 0, input.y)).normalized()
 	var on_floor := is_on_floor()
 	var want_crouch := active and Input.is_action_pressed(&"crouch")
-	var want_sprint := active and Input.is_action_pressed(&"sprint") and input.y < 0.0 and not want_crouch \
+	var shift := active and Input.is_action_pressed(&"sprint")
+	var want_sprint := allow_sprint and shift and input.y < 0.0 and not want_crouch \
 			and ads_amount < 0.3 and not (gun.def.auto and Input.is_action_pressed(&"fire"))
 
 	_coyote = 0.1 if on_floor else maxf(_coyote - delta, 0.0)
@@ -200,7 +249,7 @@ func _physics_process(delta: float) -> void:
 	_slide_cooldown = maxf(_slide_cooldown - delta, 0.0)
 
 	# 슬라이딩 시작: 달리다가 앉기.
-	if not sliding and on_floor and want_crouch and not crouching and _slide_cooldown <= 0.0 \
+	if allow_slide and not sliding and on_floor and want_crouch and not crouching and _slide_cooldown <= 0.0 \
 			and horizontal_speed() > walk_speed + 0.5:
 		sliding = true
 		_slide_time = 0.0
@@ -223,6 +272,8 @@ func _physics_process(delta: float) -> void:
 			_slide_cooldown = 0.35
 	else:
 		var max_speed := crouch_speed if crouching else (sprint_speed if want_sprint else walk_speed)
+		if shift_walks and shift and not crouching:
+			max_speed = walk_speed * 0.5
 		max_speed *= lerpf(1.0, 0.7, ads_amount)
 		var target := wish * max_speed
 		var horiz := Vector3(velocity.x, 0, velocity.z)

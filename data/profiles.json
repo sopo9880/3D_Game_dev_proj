@@ -1,0 +1,9 @@
+[
+  {"id": "coop", "name": "협동 (PvE)", "weapons": "res://data/weapons.json",
+   "movement": {}},
+
+  {"id": "arena", "name": "전술 아레나 (PvP)", "weapons": "res://data/weapons_arena.json",
+   "movement": {"allow_sprint": false, "allow_slide": false, "shift_walks": true,
+                "walk_speed": 5.4, "sprint_speed": 5.4, "crouch_speed": 2.4,
+                "ground_accel": 90, "air_accel": 3, "jump_velocity": 6.2}}
+]

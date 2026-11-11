@@ -7,7 +7,7 @@ const KEYS: Dictionary[StringName, Array] = {
 	&"jump": [KEY_SPACE], &"sprint": [KEY_SHIFT], &"crouch": [KEY_CTRL, KEY_C],
 	&"reload": [KEY_R],
 	&"weapon_1": [KEY_1], &"weapon_2": [KEY_2], &"weapon_3": [KEY_3],
-	&"toggle_tuning": [KEY_F1], &"toggle_help": [KEY_H], &"reset_stats": [KEY_F5],
+	&"toggle_tuning": [KEY_F1], &"toggle_profile": [KEY_F2], &"toggle_help": [KEY_H], &"reset_stats": [KEY_F5],
 	&"start_challenge": [KEY_T], &"sens_down": [KEY_BRACKETLEFT], &"sens_up": [KEY_BRACKETRIGHT],
 	&"toggle_fullscreen": [KEY_F11], &"pause": [KEY_ESCAPE],
 }

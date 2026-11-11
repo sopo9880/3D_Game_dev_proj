@@ -49,6 +49,7 @@ func _ready() -> void:
 func rebuild() -> void:
 	for c in _box.get_children():
 		c.queue_free()
+	_section("규칙: %s  (F2로 전환)" % player.profile_name())
 	_section("무기: %s" % player.gun.def.display_name)
 	for t in WeaponDef.TUNABLES:
 		_row(player.gun.def, t)
@@ -107,7 +108,11 @@ func export_data() -> Dictionary:
 	var movement := {}
 	for t in PlayerController.TUNABLES:
 		movement[t[0]] = snappedf(float(player.get(t[0])), 0.001)
-	return {"version": ProjectSettings.get_setting("application/config/version", "?"), "weapons": weapons, "movement": movement}
+	return {
+		"version": ProjectSettings.get_setting("application/config/version", "?"),
+		"profile": str((player.profiles[player.profile_index] as Dictionary).get("id", "?")),
+		"weapons": weapons, "movement": movement,
+	}
 
 
 func _export() -> void:
@@ -122,14 +127,7 @@ func _export() -> void:
 
 
 func _reset() -> void:
-	var defaults := WeaponDef.load_all("res://data/weapons.json")
-	for g in player.guns:
-		for d in defaults:
-			if d.id == g.def.id:
-				g.def = d
-	var fresh := PlayerController.new()
-	for t in PlayerController.TUNABLES:
-		player.set(t[0], fresh.get(t[0]))
-	fresh.free()
+	# 현재 규칙 묶음을 다시 적용하면 무기와 이동 수치가 데이터 파일의 값으로 돌아간다.
+	player.apply_profile(player.profile_index)
 	rebuild()
 	_status.text = "기본값으로 되돌렸습니다."

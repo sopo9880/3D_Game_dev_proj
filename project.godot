@@ -7,7 +7,7 @@ config_version=5
 
 config/name="Edenfall"
 config/description="가꾸고, 자동화하고, 싸워서 되살리는 협동 게임"
-config/version="0.1.0.0"
+config/version="0.1.1.0"
 run/main_scene="res://game/range/range.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 

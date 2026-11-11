@@ -1,0 +1,25 @@
+[
+  {"id": "pistol", "name": "권총 (아레나)", "slot": 3,
+   "damage": 26, "pellets": 1, "rpm": 400, "auto": false, "mag": 12, "reload_time": 1.6, "reload_per_shell": false,
+   "infinite_ammo": true, "head_mult": 3.0,
+   "falloff_start": 20, "falloff_end": 40, "falloff_min": 0.8,
+   "spread_hip": 0.25, "spread_ads": 0.2, "spread_move": 3.0, "spread_air": 7.0, "bloom_per_shot": 0.7, "bloom_max": 3.0, "bloom_recover": 7.0,
+   "recoil_v": 1.6, "recoil_v_cap": 6.0, "recoil_h": [0.1, -0.15, 0.2, -0.1], "recoil_h_rand": 0.2, "recoil_snap": 32, "recoil_recover": 10, "recoil_reset_time": 0.4, "ads_recoil_mult": 0.9,
+   "ads_fov": 75, "ads_time": 0.12, "kick_back": 0.05, "kick_up": 6.0, "shake": 0.2},
+
+  {"id": "rifle", "name": "소총 (아레나)", "slot": 1,
+   "damage": 39, "pellets": 1, "rpm": 585, "auto": true, "mag": 25, "reload_time": 2.5, "reload_per_shell": false,
+   "infinite_ammo": false, "head_mult": 4.0,
+   "falloff_start": 40, "falloff_end": 60, "falloff_min": 0.85,
+   "spread_hip": 0.2, "spread_ads": 0.12, "spread_move": 5.0, "spread_air": 9.0, "bloom_per_shot": 0.14, "bloom_max": 1.6, "bloom_recover": 4.0,
+   "recoil_v": 0.95, "recoil_v_cap": 7.5, "recoil_h": [0.0, 0.0, 0.05, -0.1, 0.1, 0.45, 0.6, 0.5, 0.3, -0.2, -0.6, -0.7, -0.6, -0.3, 0.2, 0.6], "recoil_h_rand": 0.08, "recoil_snap": 34, "recoil_recover": 6, "recoil_reset_time": 0.35, "ads_recoil_mult": 0.85,
+   "ads_fov": 72, "ads_time": 0.15, "kick_back": 0.04, "kick_up": 2.6, "shake": 0.15},
+
+  {"id": "shotgun", "name": "샷건 (아레나)", "slot": 2,
+   "damage": 13, "pellets": 12, "rpm": 66, "auto": false, "mag": 5, "reload_time": 0.55, "reload_per_shell": true,
+   "infinite_ammo": false, "head_mult": 2.0,
+   "falloff_start": 7, "falloff_end": 16, "falloff_min": 0.15,
+   "spread_hip": 2.6, "spread_ads": 2.6, "spread_move": 0.4, "spread_air": 2.0, "bloom_per_shot": 0.0, "bloom_max": 0.0, "bloom_recover": 5.0,
+   "recoil_v": 5.0, "recoil_v_cap": 12.0, "recoil_h": [0.3, -0.4], "recoil_h_rand": 0.5, "recoil_snap": 22, "recoil_recover": 6, "recoil_reset_time": 0.7, "ads_recoil_mult": 1.0,
+   "ads_fov": 80, "ads_time": 0.15, "kick_back": 0.12, "kick_up": 11.0, "shake": 0.6}
+]

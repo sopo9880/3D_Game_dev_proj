@@ -31,7 +31,7 @@ func _ready() -> void:
 	_help.text = "\n".join([
 		"WASD 이동 · Shift 달리기 · Space 점프 · Ctrl/C 앉기 (달리다 앉으면 슬라이딩)",
 		"좌클릭 사격 · 우클릭 조준 · R 재장전 · 1/2/3 또는 휠 무기 교체",
-		"[ ] 감도 · T 표적 도전 · F5 통계 초기화 · F1 수치 조정 · F11 전체 화면 · H 도움말 · Esc 일시정지",
+		"F2 규칙 전환 (협동 ↔ 전술 아레나) · F1 수치 조정 · [ ] 감도 · T 표적 도전 · F5 통계 초기화 · F11 전체 화면 · H 도움말 · Esc 일시정지",
 	])
 	_paused.text = "화면을 클릭하면 시작합니다"
 
@@ -54,8 +54,8 @@ func _process(delta: float) -> void:
 	_ammo.text = "%s\n%d / %s%s" % [g.def.display_name, g.mag, ammo_text, "  재장전…" if g.is_reloading() else ""]
 	var acc := 100.0 * player.stat_hits / maxi(player.stat_shots, 1)
 	var head_rate := 100.0 * player.stat_heads / maxi(player.stat_hits, 1)
-	_stats.text = "FPS %d\n속도 %.1f m/s\n감도 ×%.2f\n\n발사 %d · 명중 %d (%.0f%%)\n머리 %.0f%% · 처치 %d\n누적 피해 %d" % [
-		Engine.get_frames_per_second(), player.horizontal_speed(), player.sens_mult,
+	_stats.text = "규칙: %s\nFPS %d\n속도 %.1f m/s\n감도 ×%.2f\n\n발사 %d · 명중 %d (%.0f%%)\n머리 %.0f%% · 처치 %d\n누적 피해 %d" % [
+		player.profile_name(), Engine.get_frames_per_second(), player.horizontal_speed(), player.sens_mult,
 		player.stat_shots, player.stat_hits, acc, head_rate, player.stat_kills, roundi(player.stat_damage)]
 	_top.text = message
 	_paused.visible = Input.mouse_mode != Input.MOUSE_MODE_CAPTURED and player.input_enabled
