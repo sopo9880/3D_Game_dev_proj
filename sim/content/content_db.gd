@@ -8,6 +8,8 @@ var item_ids: Array[StringName] = []  ## 인덱스 → ID
 var recipes: Dictionary[StringName, RecipeDef] = {}
 var structures: Dictionary[StringName, StructureDef] = {}
 var crops: Array[CropDef] = []
+var zones: Array[ZoneDef] = []
+var gather_ticks: Dictionary[int, int] = {}   ## 손으로 캘 수 있는 것: 아이템 인덱스 → 다시 캘 때까지의 틱
 var starting_kit: Dictionary[int, int] = {}   ## 아이템 인덱스 → 수량
 var max_build_height: int = 48
 var max_decor: int = 2000
@@ -21,6 +23,7 @@ static func load_from_dir(dir: String) -> ContentDB:
 	db._load_structures(db._read(dir.path_join("structures.json")))
 	db._load_crops(db._read(dir.path_join("crops.json")))
 	db._load_rules(dir.path_join("rules.json"))
+	db._load_zones(db._read(dir.path_join("zones.json")))
 	return db
 
 
@@ -50,7 +53,9 @@ func content_hash() -> String:
 		parts.append("%s:%d:%s:%d:%d:%d:%s" % [id, s.kind, s.footprint, s.power_use, s.power_gen, s.power_radius, JSON.stringify(s.params)])
 	for c in crops:
 		parts.append("%s:%d:%d:%d:%d:%d:%d:%d" % [c.id, c.seed_item, c.product_item, c.grow_ticks, c.stages, c.yield_count, c.seed_return, c.bonus_seed_percent])
-	parts.append("kit:%s:%d:%d" % [starting_kit, max_build_height, max_decor])
+	for z in zones:
+		parts.append("%s:%d:%d:%s:%s" % [z.id, z.capsule_item, z.capsule_points, z.beacon_site, z.unlock_zone])
+	parts.append("kit:%s:%d:%d:%s" % [starting_kit, max_build_height, max_decor, gather_ticks])
 	return "\n".join(parts).sha256_text()
 
 
@@ -229,6 +234,38 @@ func _load_rules(path: String) -> void:
 			starting_kit[st.x] = st.y
 	max_build_height = int(rules.get("max_build_height", 48))
 	max_decor = int(rules.get("max_decor", 2000))
+	var gather: Dictionary = rules.get("gather_ticks", {})
+	for id: String in gather:
+		var idx := item_index(StringName(id))
+		if idx < 0:
+			errors.append("gather_ticks: 없는 아이템 '%s'" % id)
+		else:
+			gather_ticks[idx] = int(gather[id])
+
+
+func zone_by_id(id: StringName) -> ZoneDef:
+	for z in zones:
+		if z.id == id:
+			return z
+	return null
+
+
+func _load_zones(rows: Array) -> void:
+	for row: Dictionary in rows:
+		var z := ZoneDef.new()
+		z.id = StringName(str(row.get("id", "")))
+		z.index = zones.size()
+		z.display_name = str(row.get("name", z.id))
+		z.capsule_item = item_index(StringName(str(row.get("capsule_item", ""))))
+		z.capsule_points = int(row.get("capsule_points", 10))
+		z.beacon_site = _v3(row.get("beacon_site", [0, 0, 0]))
+		var u: Array = row.get("unlock_zone", [])
+		if z.id == &"" or z.capsule_item < 0 or z.capsule_points <= 0 or u.size() != 5:
+			errors.append("구역 '%s': 캡슐 아이템·점수·해금 구역 값 오류" % z.id)
+			continue
+		for v: Variant in u:
+			z.unlock_zone.append(int(v))
+		zones.append(z)
 
 
 func _v3(v: Variant) -> Vector3i:

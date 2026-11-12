@@ -93,6 +93,9 @@ jobs:
       - name: Build test (build mode, costs, undo, crafting, farming, ammo)
         run: timeout 180 godot --headless -- --single --saveroot=user://ci_build --buildtest
 
+      - name: Vertical slice test (gather, boss, beacon, restoration)
+        run: timeout 240 godot --headless -- --single --saveroot=user://ci_slice --slicetest
+
       - name: Save and continue test
         run: tools/save_test.sh
 

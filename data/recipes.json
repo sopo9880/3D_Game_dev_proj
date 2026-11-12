@@ -4,6 +4,7 @@
   {"id": "make_biofuel",    "inputs": [["glowleaf", 2]],                    "output": ["biofuel", 1],          "ticks": 30, "machines": ["workbench", "assembler"]},
   {"id": "make_part",       "inputs": [["iron_ingot", 2], ["scrap", 1]],    "output": ["precision_part", 1],   "ticks": 40, "machines": ["workbench", "assembler"]},
   {"id": "make_capsule",    "inputs": [["taint_crystal", 1], ["glowleaf", 2]], "output": ["purifier_capsule", 1], "ticks": 40, "machines": ["workbench", "assembler"]},
+  {"id": "make_ext_mag",    "inputs": [["precision_part", 3]],              "output": ["ext_mag", 1],          "ticks": 40, "machines": ["workbench"]},
   {"id": "make_rifle_ammo", "inputs": [["iron_ingot", 1]],                  "output": ["rifle_ammo", 30],      "ticks": 20, "machines": ["workbench"]},
   {"id": "make_shell",      "inputs": [["iron_ingot", 1]],                  "output": ["shell", 8],            "ticks": 20, "machines": ["workbench"]}
 ]

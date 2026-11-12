@@ -10,5 +10,13 @@
    "attack_damage": 10, "attack_range": 30, "attack_windup": 0.4, "attack_interval": 2.0,
    "keep_min": 12, "keep_max": 24, "projectile_speed": 18,
    "radius": 0.4, "height": 1.5, "head_radius": 0.24,
-   "loot": [["taint_crystal", 1, 0.7], ["scrap", 1, 0.3]]}
+   "loot": [["taint_crystal", 1, 0.7], ["scrap", 1, 0.3]]},
+
+  {"id": "warden", "name": "골짜기 수호체", "kind": "boss",
+   "hp": 1500, "speed": 3.5, "aggro_range": 70,
+   "attack_damage": 35, "attack_range": 3.0, "attack_windup": 1.5, "attack_interval": 2.5,
+   "charge_speed": 17, "charge_time": 1.4, "stun_time": 2.0,
+   "barrage_damage": 25, "barrage_radius": 3.0, "barrage_delay": 1.2, "summon_count": 3,
+   "radius": 1.2, "height": 3.2, "head_radius": 0.55,
+   "loot": [["scrap", 5, 1.0], ["taint_crystal", 5, 1.0]]}
 ]

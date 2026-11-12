@@ -7,7 +7,7 @@ extends RefCounted
 ## - 정수 연산만 쓰고, 순회 순서는 항상 구조물 ID 오름차순이나 미리 계산한 순서다.
 ## - 같은 상태에서 같은 횟수만큼 tick()을 부르면 항상 같은 결과가 나온다.
 
-const SAVE_FORMAT := 3
+const SAVE_FORMAT := 4
 const DIRV: Array[Vector3i] = [Vector3i(0, 0, -1), Vector3i(1, 0, 0), Vector3i(0, 0, 1), Vector3i(-1, 0, 0)]
 const GRID_BUCKET := 32
 
@@ -27,6 +27,12 @@ var decors: Array[SimStructure] = []
 ## 건축 가능 구역: 높이가 정해진 평평한 단. 각 항목은 [x, z, 폭, 깊이, 지면 높이].
 ## 하나도 없으면 월드 전체가 높이 0의 평지다(테스트와 벤치마크).
 var build_zones: Array[PackedInt32Array] = []
+## 구역 복원: 구역 인덱스 → 진행도(0..100). 100이면 복원 완료이고 되돌아가지 않는다.
+var restore: Dictionary[int, int] = {}
+## 우두머리를 쓰러뜨린 구역(구역 인덱스 → true). 다시 나타나지 않는다.
+var boss_down: Dictionary[int, bool] = {}
+## 손으로 캔 자리: 칸 → 다시 캘 수 있는 틱.
+var gather_ready: Dictionary[Vector3i, int] = {}
 ## 플레이어 소지품: 플레이어 키 → (아이템 인덱스 → 수량). 월드 세이브에 함께 저장된다(D-013).
 var inventories: Dictionary[String, Dictionary] = {}
 
@@ -38,6 +44,7 @@ var junctions: Array[SimStructure] = []
 var belts: Array[SimStructure] = []
 var providers: Array[SimStructure] = []
 var plots: Array[SimStructure] = []
+var beacons: Array[SimStructure] = []
 
 var grids: Array[SimPowerGrid] = []
 var belt_order: Array[SimStructure] = []  ## 하류 먼저
@@ -185,6 +192,14 @@ func can_place(def_id: StringName, cell: Vector3i, rot: int, check_support: bool
 		return "use_place_belt"
 	if def.kind == StructureDef.Kind.DECOR:
 		return "use_place_free"
+	if def.kind == StructureDef.Kind.BEACON and check_support:
+		# 비콘은 구역마다 정해진 한 자리에만 선다.
+		var site_ok := false
+		for z in db.zones:
+			if z.beacon_site == cell:
+				site_ok = true
+		if not site_ok:
+			return "needs_site"
 	match def.kind:
 		StructureDef.Kind.FLOOR:
 			var cells := plate_cells(def, cell)
@@ -218,7 +233,7 @@ func can_place(def_id: StringName, cell: Vector3i, rot: int, check_support: bool
 			has_node = true
 		if c.y == cell.y and not _cell_supported(c):
 			supported = false
-	if def.params.get("needs_node", false) and not has_node:
+	if def.params.get("needs_node", false) and (not has_node or _mining_recipe(def, cell, rot) == null):
 		return "needs_node"
 	if check_support and not supported:
 		return "no_support"
@@ -258,6 +273,11 @@ func place(def_id: StringName, cell: Vector3i, rot: int = 0, by: String = "", fo
 			_insert_sorted(junctions, s)
 		StructureDef.Kind.PLOT:
 			_insert_sorted(plots, s)
+		StructureDef.Kind.BEACON:
+			for z in db.zones:
+				if z.beacon_site == cell:
+					s.zone = z.index
+			_insert_sorted(beacons, s)
 	if def.power_radius > 0:
 		_insert_sorted(providers, s)
 	return s
@@ -357,7 +377,7 @@ func remove(id: int) -> Variant:
 			for c in footprint_cells(s.def, s.cell, s.rot):
 				occupancy.erase(c)
 	structures.erase(id)
-	for list: Array[SimStructure] in [crafters, generators, storages, junctions, belts, providers, plots, decors]:
+	for list: Array[SimStructure] in [crafters, generators, storages, junctions, belts, providers, plots, decors, beacons]:
 		list.erase(s)
 	_dirty = true
 	return contents
@@ -594,6 +614,46 @@ func harvest(key: String, id: int) -> Dictionary[int, int]:
 	s.growth = 0
 	s.watered = false
 	return out
+
+
+# ---------------------------------------------------------------------------
+# 구역 복원, 손 채집
+# ---------------------------------------------------------------------------
+
+func zone_progress(zone: int) -> int:
+	return restore.get(zone, 0)
+
+
+func zone_restored(zone: int) -> bool:
+	return zone_progress(zone) >= 100
+
+
+func set_boss_defeated(zone: int) -> void:
+	boss_down[zone] = true
+
+
+func boss_defeated(zone: int) -> bool:
+	return boss_down.get(zone, false)
+
+
+## 그 구역의 비콘. 없으면 null.
+func beacon_of(zone: int) -> SimStructure:
+	for b in beacons:
+		if b.zone == zone:
+			return b
+	return null
+
+
+## 광맥이나 결정 덩어리를 손으로 캔다. 얻은 아이템 인덱스, 캘 수 없으면 -1.
+func gather(key: String, cell: Vector3i) -> int:
+	if not nodes.has(cell) or not inventories.has(key):
+		return -1
+	var item := nodes[cell]
+	if not db.gather_ticks.has(item) or tick_count < int(gather_ready.get(cell, 0)):
+		return -1
+	gather_ready[cell] = tick_count + db.gather_ticks[item]
+	inv_add(key, item, 1)
+	return item
 
 
 ## 그 칸에 놓인 출력/입력 포트의 방향. 벨트를 포트에 맞춰 까는 데 쓴다. 없으면 -1.
@@ -861,6 +921,15 @@ func _accept(s: SimStructure, item: int) -> bool:
 				s.store_slots_used += 1
 			s.store[item] = have + 1
 			return true
+		StructureDef.Kind.BEACON:
+			if s.zone < 0 or item != db.zones[s.zone].capsule_item or zone_progress(s.zone) >= 100:
+				return false
+			restore[s.zone] = mini(zone_progress(s.zone) + db.zones[s.zone].capsule_points, 100)
+			if restore[s.zone] >= 100:
+				# 복원 완료: 그 구역에 건축할 수 있게 된다.
+				var u := db.zones[s.zone].unlock_zone
+				add_build_zone(u[0], u[1], u[2], u[3], u[4])
+			return true
 		StructureDef.Kind.GENERATOR:
 			if not s.def.fuels.has(item) or s.fuel_count >= int(s.def.params.get("fuel_cap", 10)):
 				return false
@@ -903,7 +972,7 @@ func _rebuild_topology() -> void:
 
 	# 포트의 바깥 칸 → [구조물, 방향, 입출력]
 	var port_map: Dictionary[Vector3i, Array] = {}
-	for list: Array[SimStructure] in [crafters, generators, storages, junctions]:
+	for list: Array[SimStructure] in [crafters, generators, storages, junctions, beacons]:
 		for s in list:
 			for i in s.def.port_cells.size():
 				var dir := (s.def.port_dirs[i] + s.rot) & 3
@@ -1068,7 +1137,26 @@ func to_dict() -> Dictionary:
 		"format": SAVE_FORMAT, "tick": tick_count, "next_id": next_id,
 		"palette": palette, "nodes": node_rows, "structures": rows, "inventories": inv_rows,
 		"zones": build_zones.duplicate(),
+		"restore": _restore_rows(), "gather": _gather_rows(),
 	}
+
+
+func _restore_rows() -> Array:
+	var out: Array = []
+	for z in db.zones:
+		if restore.has(z.index) or boss_down.has(z.index):
+			out.append([String(z.id), zone_progress(z.index), boss_defeated(z.index)])
+	return out
+
+
+func _gather_rows() -> Array:
+	# 이미 지난 것은 저장하지 않는다(있든 없든 결과가 같다).
+	var out: Array = []
+	for cell: Vector3i in gather_ready:
+		if gather_ready[cell] > tick_count:
+			out.append([cell.x, cell.y, cell.z, gather_ready[cell]])
+	out.sort()
+	return out
 
 
 ## 상태 전체의 해시. 호스트와 클라이언트의 시뮬레이션이 어긋났는지 비교하는 데 쓴다.
@@ -1149,6 +1237,15 @@ static func from_dict(content: ContentDB, d: Dictionary) -> SimWorld:
 						s.slots[i] = remap[slots[i] - 1] + 1
 						s.item_count += 1
 				s.passed_total = int(row["passed"])
+	for r: Array in d.get("restore", []):
+		var zone_def := content.zone_by_id(StringName(str(r[0])))
+		if zone_def != null:
+			if int(r[1]) > 0:
+				w.restore[zone_def.index] = int(r[1])
+			if bool(r[2]):
+				w.boss_down[zone_def.index] = true
+	for g: Array in d.get("gather", []):
+		w.gather_ready[Vector3i(int(g[0]), int(g[1]), int(g[2]))] = int(g[3])
 	for inv_row: Array in d.get("inventories", []):
 		var inv: Dictionary = {}
 		var pairs: PackedInt32Array = inv_row[1]

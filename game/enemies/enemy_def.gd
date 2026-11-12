@@ -16,6 +16,14 @@ var attack_interval: float = 1.0
 var keep_min: float = 0.0
 var keep_max: float = 0.0
 var projectile_speed: float = 18.0
+# 우두머리 전용
+var charge_speed: float = 17.0
+var charge_time: float = 1.4
+var stun_time: float = 2.0
+var barrage_damage: float = 25.0
+var barrage_radius: float = 3.0
+var barrage_delay: float = 1.2
+var summon_count: float = 3.0
 var radius: float = 0.4
 var height: float = 1.2
 var head_radius: float = 0.2

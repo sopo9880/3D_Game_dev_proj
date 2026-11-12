@@ -38,7 +38,7 @@ func _ready() -> void:
 func open(id: int) -> bool:
 	var s: SimStructure = World.sim.structures.get(id)
 	if s == null or not s.kind in [StructureDef.Kind.CRAFTER, StructureDef.Kind.STORAGE, StructureDef.Kind.GENERATOR,
-			StructureDef.Kind.PLOT, StructureDef.Kind.WORKBENCH]:
+			StructureDef.Kind.PLOT, StructureDef.Kind.WORKBENCH, StructureDef.Kind.BEACON]:
 		return false
 	structure_id = id
 	_signature = ""
@@ -122,6 +122,15 @@ func _refresh() -> void:
 				lines.append("%s  %d%%%s" % [crop.display_name, mini(s.growth * 100 / crop.grow_ticks, 100), "  · 물 줌" if s.watered else ""])
 				buttons.append(["물 주기", "water", [s.id], state == "growing" and not s.watered])
 				buttons.append(["수확", "harvest", [s.id], state == "ready"])
+		StructureDef.Kind.BEACON:
+			var zone_def := db.zones[s.zone]
+			var progress := World.sim.zone_progress(s.zone)
+			lines.append("%s 복원 %d%%" % [zone_def.display_name, progress])
+			lines.append("정화 캡슐 하나에 %d%%. 벨트로도 넣을 수 있다(남쪽 포트)." % zone_def.capsule_points)
+			var capsule := db.item_def(zone_def.capsule_item)
+			var have := World.sim.inv_count(key, zone_def.capsule_item)
+			buttons.append(["%s 넣기 (소지 %d)" % [capsule.display_name, have], "insert", [s.id, String(capsule.id), 9999],
+				have > 0 and progress < 100])
 		StructureDef.Kind.WORKBENCH:
 			lines.append("손으로 만든다. 재료는 소지품에서 쓴다.")
 			for r in s.def.recipes:

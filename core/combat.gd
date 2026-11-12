@@ -12,6 +12,7 @@ signal shot_seen(peer_id: int, weapon_id: StringName, from: Vector3, to: Vector3
 signal projectile_spawned(id: int, kind: StringName, pos: Vector3, vel: Vector3)
 signal projectile_ended(id: int, pos: Vector3, exploded: bool)
 signal grenades_changed
+signal hazard_spawned(pos: Vector3, radius: float, delay: float)   ## 바닥 표시 뒤 폭발하는 위험 지대
 
 enum PState { ALIVE, DOWNED }
 
@@ -42,6 +43,13 @@ class Projectile:
 	var owner_peer: int = 0
 
 
+class Hazard:
+	var pos: Vector3
+	var radius: float
+	var left: float
+	var damage: float
+
+
 class SpawnPoint:
 	var pos: Vector3
 	var type_index: int
@@ -57,9 +65,8 @@ var weapons: Dictionary[StringName, WeaponDef] = {}
 
 ## 호스트 설정
 var auto_spawn: bool = true
-var spawn_cap_per_point: int = 2
-var spawn_delay: float = 12.0
-var activation_range: float = 70.0   ## 플레이어가 이 안에 있을 때만 적이 나온다
+var spawn_delay: float = 45.0
+var activation_range: float = 45.0   ## 플레이어가 출현 지점에서 이 안에 있을 때만 적이 나온다
 
 ## 점검용 집계
 var rejected_shots: int = 0
@@ -69,6 +76,12 @@ var _scene: Node3D
 var _nav_map: RID
 var _spawn: Vector3 = Vector3.ZERO
 var _spawn_points: Array[SpawnPoint] = []
+var _hazards: Array[Hazard] = []
+var _zone: int = -1                  ## 적이 나오는 구역(복원 진행도에 따라 줄어든다). -1이면 없음
+var _boss_spawn: Vector3 = Vector3.ZERO
+var _boss_radius: float = 0.0
+var _boss: Enemy = null
+var _boss_alone: float = 0.0
 var _local_body: RID
 var _next_enemy_id: int = 1
 var _next_projectile_id: int = 1
@@ -97,16 +110,21 @@ func _ready() -> void:
 # 씬 연결: 전투가 벌어지는 맵이 자신을 등록한다.
 # ---------------------------------------------------------------------------
 
-func bind_scene(scene: Node3D, spawn: Vector3, nav_map: RID, spawn_points: Array, local_body: RID) -> void:
+## config: {"spawn_points": Array[Vector3], "zone": int, "boss_spawn": Vector3, "boss_radius": float}
+func bind_scene(scene: Node3D, spawn: Vector3, nav_map: RID, config: Dictionary, local_body: RID) -> void:
 	unbind_scene()
 	_scene = scene
 	_spawn = spawn
 	_nav_map = nav_map
 	_local_body = local_body
-	for i in spawn_points.size():
+	_zone = int(config.get("zone", -1))
+	_boss_spawn = config.get("boss_spawn", Vector3.ZERO)
+	_boss_radius = float(config.get("boss_radius", 0.0))
+	var points: Array = config.get("spawn_points", [])
+	for i in points.size():
 		var sp := SpawnPoint.new()
-		sp.pos = spawn_points[i]
-		sp.type_index = i % maxi(enemy_defs.size(), 1)
+		sp.pos = points[i]
+		sp.type_index = i % 2   # 돌진형과 원거리형을 번갈아
 		_spawn_points.append(sp)
 	_sync_players()
 	my_grenades = CombatRules.GRENADE_MAX
@@ -120,6 +138,9 @@ func unbind_scene() -> void:
 	enemies.clear()
 	_projectiles.clear()
 	_spawn_points.clear()
+	_hazards.clear()
+	_boss = null
+	_zone = -1
 	_scene = null
 	vitals.clear()
 	_grenades.clear()
@@ -162,6 +183,7 @@ func _physics_process(delta: float) -> void:
 		return
 	_update_vitals(delta)
 	_update_projectiles(delta)
+	_update_hazards(delta)
 	if auto_spawn:
 		_update_spawner(delta)
 	_enemy_timer += delta
@@ -444,10 +466,26 @@ func _do_melee(sender: int, enemy_ids: PackedInt32Array) -> void:
 
 
 func _damage_enemy(e: Enemy, amount: float, by: int) -> void:
-	e.hp -= amount
+	# 약점이 드러난 우두머리는 두 배로 아프다.
+	e.hp -= amount * (2.0 if e.stunned else 1.0)
 	e.on_damaged()
+	if e.def.kind == &"boss" and e.hp > 0.0:
+		# 체력 66%, 33%에서 한 번씩 졸개를 부른다.
+		var frac := e.hp / e.max_hp
+		while e.summons_done < 2 and frac <= [0.66, 0.33][e.summons_done]:
+			e.summons_done += 1
+			for i in int(e.def.summon_count):
+				var a := TAU * i / e.def.summon_count
+				spawn_enemy(&"crawler", e.global_position + Vector3(cos(a), 0, sin(a)) * 4.0 + Vector3(0, 0.2, 0))
 	if e.hp > 0.0:
 		return
+	if e == _boss:
+		_boss = null
+		var witnesses: Array[int] = []
+		for peer: int in vitals:
+			if peer == by or (World.positions.has(peer) and World.positions[peer].distance_to(e.global_position) <= LOOT_RANGE):
+				witnesses.append(peer)
+		World.report_boss_defeated(_zone, witnesses)
 	var pos := e.global_position
 	enemies.erase(e.net_id)
 	for sp in _spawn_points:
@@ -506,10 +544,25 @@ func _make_enemy(id: int, def: EnemyDef, hp: float, puppet: bool) -> Enemy:
 	return e
 
 
+## 구역 복원이 진행될수록 한 지점에서 나오는 적이 줄고, 끝나면 더는 나오지 않는다.
+func spawn_cap() -> int:
+	var progress := World.sim.zone_progress(_zone) if _zone >= 0 else 0
+	if progress >= 100:
+		return 0
+	return 3 if progress < 50 else (2 if progress < 80 else 1)
+
+
 func _update_spawner(delta: float) -> void:
+	var cap := spawn_cap()
+	if _zone >= 0 and cap == 0:
+		# 복원이 끝났다: 남은 적은 사라진다.
+		for id: int in enemies.keys():
+			_damage_enemy(enemies[id], 99999.0, 0)
+		return
+	_update_boss(delta)
 	for sp in _spawn_points:
 		sp.cooldown = maxf(sp.cooldown - delta, 0.0)
-		if sp.cooldown > 0.0 or sp.alive.size() >= spawn_cap_per_point or enemies.size() >= MAX_ENEMIES:
+		if sp.cooldown > 0.0 or sp.alive.size() >= cap or enemies.size() >= MAX_ENEMIES:
 			continue
 		var near: int = nearest_alive_player(sp.pos, activation_range)[0]
 		if near < 0:
@@ -521,6 +574,76 @@ func _update_spawner(delta: float) -> void:
 		if e != null:
 			sp.alive.append(e.net_id)
 			sp.cooldown = spawn_delay
+
+
+## 우두머리는 플레이어가 그 터에 들어오면 나타나고, 모두 떠나면 물러난다(체력이 처음으로 돌아간다).
+func _update_boss(delta: float) -> void:
+	if _zone < 0 or _boss_radius <= 0.0 or World.sim.boss_defeated(_zone):
+		return
+	if _boss == null or not is_instance_valid(_boss):
+		_boss = null
+		if nearest_alive_player(_boss_spawn, _boss_radius)[0] >= 0:
+			_boss = spawn_enemy(&"warden", _boss_spawn + Vector3(0, 0.2, 0))
+			_boss_alone = 0.0
+		return
+	if nearest_alive_player(_boss.global_position, 80.0)[0] >= 0:
+		_boss_alone = 0.0
+		return
+	_boss_alone += delta
+	if _boss_alone > 6.0:
+		enemies.erase(_boss.net_id)
+		_boss.queue_free()
+		_boss = null
+
+
+func boss() -> Enemy:
+	return _boss if _boss != null and is_instance_valid(_boss) else null
+
+
+## 우두머리의 포격: 플레이어들의 발밑에 표시가 뜨고 잠시 뒤 터진다.
+func boss_barrage(e: Enemy, target_peer: int) -> void:
+	var spots: Array[Vector3] = []
+	for peer: int in vitals:
+		if is_alive(peer) and World.positions.has(peer) and World.positions[peer].distance_to(e.global_position) < 60.0:
+			spots.append(World.positions[peer])
+	# 표시는 항상 세 개: 사람이 적으면 노린 사람 주변에 더 놓는다.
+	var center: Vector3 = World.positions.get(target_peer, e.global_position)
+	while spots.size() < 3:
+		var a := _rng.randf() * TAU
+		spots.append(center + Vector3(cos(a), 0, sin(a)) * _rng.randf_range(3.5, 6.0))
+	for i in mini(spots.size(), 3):
+		spawn_hazard(spots[i], e.def.barrage_radius, e.def.barrage_delay, e.def.barrage_damage)
+
+
+func spawn_hazard(pos: Vector3, radius: float, delay: float, damage: float) -> void:
+	var h := Hazard.new()
+	h.pos = pos
+	h.radius = radius
+	h.left = delay
+	h.damage = damage
+	_hazards.append(h)
+	for p in World.synced_peers():
+		_ev_hazard.rpc_id(p, pos, radius, delay)
+	hazard_spawned.emit(pos, radius, delay)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _ev_hazard(pos: Vector3, radius: float, delay: float) -> void:
+	hazard_spawned.emit(pos, radius, delay)
+
+
+func _update_hazards(delta: float) -> void:
+	for h: Hazard in _hazards.duplicate():
+		h.left -= delta
+		if h.left > 0.0:
+			continue
+		_hazards.erase(h)
+		for peer: int in vitals:
+			if not is_alive(peer) or not World.positions.has(peer):
+				continue
+			var to := World.positions[peer] - h.pos
+			if Vector2(to.x, to.z).length() <= h.radius and absf(to.y) < 3.0:
+				damage_player(peer, h.damage)
 
 
 func _broadcast_enemies() -> void:
@@ -542,7 +665,7 @@ func _broadcast_enemies() -> void:
 		yaws.append(e.rotation.y)
 		hps.append(e.hp)
 		max_hps.append(e.max_hp)
-		flags.append(1 if e.attacking else 0)
+		flags.append((1 if e.attacking else 0) | (2 if e.stunned else 0))
 	for p in peers:
 		_ev_enemies.rpc_id(p, ids, types, positions, yaws, hps, max_hps, flags)
 
@@ -565,7 +688,8 @@ func _ev_enemies(ids: PackedInt32Array, types: PackedInt32Array, positions: Pack
 		e.target_yaw = yaws[i]
 		e.hp = hps[i]
 		e.max_hp = max_hps[i]
-		e.attacking = flags[i] != 0
+		e.attacking = flags[i] & 1 != 0
+		e.stunned = flags[i] & 2 != 0
 	for id: int in enemies.keys():
 		if not seen.has(id):
 			enemies[id].queue_free()

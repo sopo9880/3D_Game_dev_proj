@@ -65,7 +65,7 @@ func test_loot_rolls_follow_probabilities() -> void:
 func test_enemy_data_is_valid() -> void:
 	var db := ContentDB.load_from_dir("res://data")
 	var defs := EnemyDef.load_all("res://data/enemies.json")
-	eq(defs.size(), 2, "적 종류")
+	eq(defs.size(), 3, "적 종류(돌진형, 원거리형, 수호체)")
 	for d in defs:
 		check(d.hp > 0.0 and d.speed > 0.0 and d.attack_damage > 0.0, "%s 수치" % d.id)
 		for row: Array in d.loot:

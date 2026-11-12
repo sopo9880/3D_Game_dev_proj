@@ -41,5 +41,6 @@
   {"id": "lamp",    "tab": "interior", "kind": "decor", "footprint": [1, 1, 1], "cost": [["iron_ingot", 1]], "params": {"size": [0.25, 1.8, 0.25], "light": true}},
   {"id": "planter", "tab": "nature",   "kind": "decor", "footprint": [1, 1, 1], "cost": [["iron_ingot", 1]], "params": {"size": [0.6, 0.5, 0.6]}},
   {"id": "fence",   "tab": "nature",   "kind": "decor", "footprint": [1, 1, 1], "cost": [["iron_ingot", 1]], "params": {"size": [2.0, 1.0, 0.12]}},
-  {"id": "beacon",    "tab": "industry", "footprint": [3, 6, 3], "cost": [["energy_core", 1], ["iron_ingot", 30], ["precision_part", 4]]}
+  {"id": "beacon",    "tab": "industry", "kind": "beacon", "footprint": [3, 6, 3], "cost": [["energy_core", 1], ["iron_ingot", 30], ["precision_part", 4]],
+   "ports": [{"cell": [1, 0, 2], "dir": "s", "io": "in"}]}
 ]

@@ -14,6 +14,7 @@ static func migrate_sim(d: Dictionary) -> Dictionary:
 		match format:
 			1: out = _sim_1_to_2(out)
 			2: out = _sim_2_to_3(out)
+			3: out = _sim_3_to_4(out)
 			_: return {}
 		format = int(out.get("format", -1))
 	return out
@@ -32,4 +33,13 @@ static func _sim_1_to_2(d: Dictionary) -> Dictionary:
 static func _sim_2_to_3(d: Dictionary) -> Dictionary:
 	d["zones"] = []
 	d["format"] = 3
+	return d
+
+
+## 3 → 4 (v0.4.0): 구역 복원 진행도와 손 채집 대기 시간이 월드 상태에 들어왔다.
+## 옛 세이브는 아무 구역도 복원하지 않은 상태로 시작한다.
+static func _sim_3_to_4(d: Dictionary) -> Dictionary:
+	d["restore"] = []
+	d["gather"] = []
+	d["format"] = 4
 	return d

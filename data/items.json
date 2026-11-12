@@ -9,6 +9,7 @@
   {"id": "taint_crystal",    "name": "오염 결정",   "stack": 50,  "category": "raw"},
   {"id": "purifier_capsule", "name": "정화 캡슐",   "stack": 20,  "category": "part"},
   {"id": "energy_core",      "name": "에너지 코어", "stack": 5,   "category": "key"},
+  {"id": "ext_mag",          "name": "확장 탄창",   "stack": 1,   "category": "part"},
   {"id": "rifle_ammo",       "name": "소총탄",      "stack": 300, "category": "ammo"},
   {"id": "shell",            "name": "산탄",        "stack": 80,  "category": "ammo"}
 ]

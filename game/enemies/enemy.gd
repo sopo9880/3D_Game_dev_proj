@@ -12,6 +12,8 @@ var hp: float = 1.0
 var max_hp: float = 1.0
 var puppet: bool = false
 var attacking: bool = false          ## 공격 준비 동작 중(표시용, 동기화됨)
+var stunned: bool = false            ## 우두머리: 벽에 부딪혀 약점이 드러났다(받는 피해 2배, 동기화됨)
+var summons_done: int = 0            ## 우두머리: 이미 부른 소환 횟수
 
 # 꼭두각시용 목표값
 var target_pos: Vector3 = Vector3.ZERO
@@ -29,6 +31,14 @@ var _evade: float = 0.0
 var _phase: float = 0.0
 var _flash: float = 0.0
 var _stun: float = 0.0
+# 우두머리 상태 기계
+enum Boss { CHASE, TELEGRAPH, DASH, STUNNED, CAST }
+var _boss_state: int = Boss.CHASE
+var _boss_t: float = 2.0
+var _dash_dir: Vector3 = Vector3.FORWARD
+var _dash_hit: Dictionary[int, bool] = {}
+var _next_is_charge: bool = true
+var _instant: bool = false
 var _mat: StandardMaterial3D
 var _label: Label3D
 var _visual: Node3D
@@ -49,6 +59,8 @@ func _ready() -> void:
 	_strafe_dir = 1.0 if randf() < 0.5 else -1.0
 	_mat = StandardMaterial3D.new()
 	_mat.albedo_color = Color(0.55, 0.2, 0.5) if def.kind == &"melee" else Color(0.3, 0.55, 0.3)
+	if def.kind == &"boss":
+		_mat.albedo_color = Color(0.3, 0.12, 0.18)
 	_mat.emission_enabled = true
 	_mat.emission = Color.BLACK
 	_mat.roughness = 0.7
@@ -74,8 +86,11 @@ func _ready() -> void:
 	head.name = &"Head"
 	head.shape = head_shape
 	# 돌진형은 머리가 앞으로 나와 있고, 원거리형은 위에 있다.
-	head.position = Vector3(0, def.height * 0.75, -def.radius * 0.9) if def.kind == &"melee" \
-			else Vector3(0, def.height + def.head_radius * 0.6, 0)
+	head.position = Vector3(0, def.height + def.head_radius * 0.6, 0)
+	if def.kind == &"melee":
+		head.position = Vector3(0, def.height * 0.75, -def.radius * 0.9)
+	elif def.kind == &"boss":
+		head.position = Vector3(0, def.height * 0.72, -def.radius * 0.95)
 	add_child(head)
 	var head_mesh := SphereMesh.new()
 	head_mesh.radius = def.head_radius
@@ -133,9 +148,11 @@ func _process(delta: float) -> void:
 	if _flash > 0.0:
 		_flash = maxf(_flash - delta * 7.0, 0.0)
 	var glow := Color(1, 1, 1) * _flash + (Color(1.0, 0.3, 0.1) * 0.9 if attacking else Color.BLACK)
+	if stunned:
+		glow += Color(0.2, 0.7, 1.0) * 0.8
 	_mat.emission = glow
-	_label.text = str(ceili(maxf(hp, 0.0)))
-	_label.modulate.a = 1.0 if hp < max_hp else 0.0
+	_label.text = ("약점 노출!  " if stunned else "") + str(ceili(maxf(hp, 0.0)))
+	_label.modulate.a = 1.0 if hp < max_hp or def.kind == &"boss" else 0.0
 	# 공격 준비 중에는 몸을 움츠린다.
 	_visual.scale = _visual.scale.lerp(Vector3(1.15, 0.8, 1.15) if attacking else Vector3.ONE, 1.0 - exp(-14.0 * delta))
 	if puppet:
@@ -165,16 +182,25 @@ func _physics_process(delta: float) -> void:
 		to.y = 0.0
 		var dist := to.length()
 		var dir := to / maxf(dist, 0.001)
-		horizontal = _think_melee(peer, goal, dist, dir, delta) if def.kind == &"melee" \
-				else _think_ranged(peer, goal, dist, dir, delta)
-		if attacking or horizontal.length() < 0.1:
+		match def.kind:
+			&"melee": horizontal = _think_melee(peer, goal, dist, dir, delta)
+			&"boss": horizontal = _think_boss(peer, goal, dist, dir, delta)
+			_: horizontal = _think_ranged(peer, goal, dist, dir, delta)
+		if _boss_state == Boss.DASH:
+			rotation.y = atan2(-_dash_dir.x, -_dash_dir.z)
+		elif attacking or horizontal.length() < 0.1:
 			rotation.y = lerp_angle(rotation.y, atan2(-dir.x, -dir.z), minf(10.0 * delta, 1.0))
 		else:
 			rotation.y = lerp_angle(rotation.y, atan2(-horizontal.x, -horizontal.z), minf(10.0 * delta, 1.0))
 	else:
 		attacking = false
+		stunned = false
 		_windup = -1.0
+		_boss_state = Boss.CHASE
 	var h := Vector3(velocity.x, 0, velocity.z).move_toward(horizontal, 30.0 * delta)
+	if _instant:
+		h = horizontal
+		_instant = false
 	velocity.x = h.x
 	velocity.z = h.z
 	velocity.y = velocity.y - GRAVITY * delta if not is_on_floor() else -0.5
@@ -235,6 +261,69 @@ func _think_ranged(peer: int, goal: Vector3, dist: float, dir: Vector3, delta: f
 	if dist > def.keep_max:
 		return _path_direction(goal, dir) * def.speed
 	return side * def.speed * 0.5
+
+
+## 우두머리: 돌진(예고 → 직선 돌진, 벽에 부딪히면 약점 노출)과 포격(바닥 표시 → 폭발)을 번갈아 한다.
+func _think_boss(peer: int, goal: Vector3, dist: float, dir: Vector3, delta: float) -> Vector3:
+	_boss_t -= delta
+	match _boss_state:
+		Boss.TELEGRAPH:
+			# 예고 끝 무렵에 방향이 굳는다. 그 뒤에 옆으로 비키면 빗나간다.
+			if _boss_t > 0.35:
+				_dash_dir = dir
+			if _boss_t <= 0.0:
+				attacking = false
+				_boss_state = Boss.DASH
+				_boss_t = def.charge_time
+				_dash_hit.clear()
+			return Vector3.ZERO
+		Boss.DASH:
+			for p: int in Combat.vitals:
+				if _dash_hit.has(p) or not Combat.is_alive(p) or not World.positions.has(p):
+					continue
+				var to := World.positions[p] - global_position
+				if Vector2(to.x, to.z).length() <= def.radius + 1.0 and absf(to.y) < def.height:
+					_dash_hit[p] = true
+					Combat.damage_player(p, def.attack_damage)
+			var speed_now := Vector2(get_real_velocity().x, get_real_velocity().z).length()
+			if is_on_wall() and _boss_t < def.charge_time - 0.15 and speed_now < def.charge_speed * 0.4:
+				_boss_state = Boss.STUNNED
+				_boss_t = def.stun_time
+				stunned = true
+				_flash = 1.0
+				return Vector3.ZERO
+			if _boss_t <= 0.0:
+				_boss_state = Boss.CHASE
+				_boss_t = def.attack_interval
+				return Vector3.ZERO
+			_instant = true
+			return _dash_dir * def.charge_speed
+		Boss.STUNNED:
+			if _boss_t <= 0.0:
+				stunned = false
+				_boss_state = Boss.CHASE
+				_boss_t = 0.8
+			return Vector3.ZERO
+		Boss.CAST:
+			if _boss_t <= 0.0:
+				attacking = false
+				Combat.boss_barrage(self, peer)
+				_boss_state = Boss.CHASE
+				_boss_t = def.attack_interval
+			return Vector3.ZERO
+	# CHASE: 적당한 거리까지 다가가며 다음 공격을 고른다.
+	if _boss_t <= 0.0:
+		attacking = true
+		if _next_is_charge:
+			_boss_state = Boss.TELEGRAPH
+			_boss_t = def.attack_windup
+			_dash_dir = dir
+		else:
+			_boss_state = Boss.CAST
+			_boss_t = 0.6
+		_next_is_charge = not _next_is_charge
+		return Vector3.ZERO
+	return _path_direction(goal, dir) * def.speed if dist > 10.0 else Vector3.ZERO
 
 
 ## 길찾기 결과를 따라갈 방향. 길이 없으면 목표 쪽으로 곧장 간다.

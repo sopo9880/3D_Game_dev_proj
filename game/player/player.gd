@@ -167,6 +167,7 @@ func _ready() -> void:
 	for key: String in PROFILE_KEYS:
 		_base_values[key] = get(key)
 	World.consumed.connect(_on_ammo_consumed)
+	World.inventory_changed.connect(refresh_mods)
 	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://data/profiles.json"))
 	profiles = parsed if parsed is Array else []
 	apply_profile(0)
@@ -215,6 +216,14 @@ func _on_ammo_consumed(key: String, _item: StringName, count: int) -> void:
 		return
 	var ask: Array = _ammo_asks.pop_front()
 	(ask[0] as Gun).grant(count, ask[1])
+
+
+## 무기 개조를 반영한다(확장 탄창: 소총 탄창 +10). 소지품에 있으면 적용된다.
+func refresh_mods() -> void:
+	var bonus := 10 if World.running and World.my_count(&"ext_mag") > 0 else 0
+	for g in guns:
+		if g.def.id == &"rifle":
+			g.mag_bonus = bonus
 
 
 ## 지금 든 무기의 남은 탄약(소지품). 탄약이 필요 없는 무기는 -1.

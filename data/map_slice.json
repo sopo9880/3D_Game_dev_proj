@@ -1,0 +1,13 @@
+{
+  "build_zones": [[-44, -64, 88, 76, 0], [48, -40, 28, 28, 3], [-3, -263, 7, 7, 0]],
+  "nodes": [
+    [-23, 0, -24, "iron_ore"], [-7, 0, -24, "iron_ore"], [9, 0, -24, "iron_ore"], [25, 0, -24, "iron_ore"],
+    [-38, 0, -218, "taint_crystal"], [34, 0, -226, "taint_crystal"], [-46, 0, -252, "taint_crystal"],
+    [44, 0, -262, "taint_crystal"], [-30, 0, -284, "taint_crystal"], [26, 0, -292, "taint_crystal"],
+    [-12, 0, -236, "taint_crystal"], [14, 0, -274, "taint_crystal"]
+  ],
+  "structures": [["workbench", 3, 0, -6, 0]],
+  "valley": {"zone": "blighted_hollow", "bounds": [-60, -330, 120, 140], "entrance": [0, 0, -190],
+             "spawn_points": [[-40, 0, -210], [40, 0, -214], [-48, 0, -246], [48, 0, -250], [-34, 0, -276], [36, 0, -280]],
+             "boss_spawn": [0, 0, -312], "boss_radius": 26}
+}

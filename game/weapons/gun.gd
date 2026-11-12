@@ -17,12 +17,18 @@ var burst_index: int = 0
 var since_shot: float = 99.0
 ## 켜면 재장전이 탄창을 직접 채우지 않고 ammo_wanted로 요청한다(월드의 소지품에서 차감).
 var external_ammo: bool = false
+var mag_bonus: int = 0           ## 개조로 늘어난 탄창
 var _pending: int = 0            ## 요청하고 아직 받지 못한 탄약
 
 
 func _init(weapon: WeaponDef) -> void:
 	def = weapon
-	mag = def.mag
+	mag = capacity()
+
+
+## 탄창 크기(개조 포함).
+func capacity() -> int:
+	return def.mag + mag_bonus
 
 
 func is_reloading() -> bool:
@@ -45,11 +51,11 @@ func update(delta: float) -> void:
 			if def.reload_per_shell:
 				_fill(1)
 				reload_step.emit()
-				if mag + _pending < def.mag:
+				if mag + _pending < capacity():
 					reload_left += def.reload_time
 					return
 			else:
-				_fill(def.mag - mag)
+				_fill(capacity() - mag)
 			reload_left = 0.0
 			reload_finished.emit()
 
@@ -61,13 +67,13 @@ func _fill(count: int) -> void:
 		_pending += count
 		ammo_wanted.emit(count)
 	else:
-		mag = mini(mag + count, def.mag)
+		mag = mini(mag + count, capacity())
 
 
 ## 외부 탄약 모드: 요청했던 탄약 중 실제로 받은 만큼 채운다. 모자라게 받았으면 장전을 멈춘다.
 func grant(count: int, asked: int) -> void:
 	_pending = maxi(_pending - asked, 0)
-	mag = mini(mag + count, def.mag)
+	mag = mini(mag + count, capacity())
 	if count < asked:
 		reload_left = 0.0
 
@@ -104,7 +110,7 @@ func fire(ads: bool) -> Vector2:
 
 
 func start_reload() -> bool:
-	if is_reloading() or mag >= def.mag:
+	if is_reloading() or mag >= capacity():
 		return false
 	reload_left = def.reload_time
 	reload_started.emit()

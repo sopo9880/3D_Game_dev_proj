@@ -1,0 +1,6 @@
+[
+  {"id": "blighted_hollow", "name": "메마른 골짜기",
+   "capsule_item": "purifier_capsule", "capsule_points": 10,
+   "beacon_site": [-1, 0, -261],
+   "unlock_zone": [-56, -326, 112, 132, 0]}
+]

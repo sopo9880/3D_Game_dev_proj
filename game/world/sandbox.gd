@@ -22,6 +22,10 @@ var _nettest_died: int = 0
 var _nettest_was_downed: bool = false
 var _node_markers: Node3D
 var yard: CombatYard
+var map: SliceMap
+var _env: Environment
+var _gather_timer: float = 0.0
+var _goal_timer: float = 0.0
 var combat_view: CombatView
 var build: BuildMode
 var panel: StructurePanel
@@ -30,6 +34,9 @@ var panel: StructurePanel
 func _ready() -> void:
 	InputSetup.register()
 	_build_environment()
+	map = SliceMap.new()
+	add_child(map)
+	map.set_environment(_env)
 	yard = CombatYard.new()
 	add_child(yard)
 	_node_markers = Node3D.new()
@@ -66,7 +73,9 @@ func _ready() -> void:
 		"WASD 이동 · Shift 달리기 · Space 점프 (턱 앞에서 앞으로 밀면 올라타기) · Ctrl 앉기/슬라이딩",
 		"좌클릭 사격 · 우클릭 조준 · R 재장전 · V 근접 공격 · 1/2/3 무기 · G 수류탄 · E 동료 일으키기",
 		"높은 턱은 붙잡고 매달린다 (W 오르기 · A/D 옆걸음 · S 놓기 · 벽을 등지고 점프하면 차고 나가기)",
-		"벽 옆에서 달리며 점프 = 벽 달리기, 다시 점프 = 벽 차기 · 뒤쪽(+Z) 담장 안이 전투 구역",
+		"벽 옆에서 달리며 점프 = 벽 달리기, 다시 점프 = 벽 차기",
+		"E: 광맥·결정 캐기(누르고 있기), 설비·작업대·밭·비콘 열기 · 북쪽(앞)으로 가면 메마른 골짜기",
+		"뒤쪽(+Z) 담장 안은 훈련장 — K를 누르면 연습용 적이 나온다(호스트)",
 		"B 건축 모드 (Tab 탭 · 휠 선택 · R 회전 · 좌클릭 설치 · X 철거 · F 같은 것 고르기 · Z 되돌리기 · Esc 닫기) · E 설비 열기",
 		"노란 띠 안쪽이 건축 구역. 화살표는 설비의 입력(파랑)과 출력(주황)",
 		"N 기준 생산 라인 한 벌 · F9 부하 시험(설비 504개를 한 번에, 프레임 측정용) — 개발용, 호스트만 · Esc 마우스 풀기",
@@ -90,8 +99,15 @@ func _ready() -> void:
 	combat_view.yard = yard
 	add_child(combat_view)
 	# 길찾기 메시는 적을 움직이는 호스트만 필요하다.
-	var nav_map := yard.bake() if Net.is_host() else RID()
-	Combat.bind_scene(self, Vector3.ZERO, nav_map, yard.spawn_points, player.get_rid())
+	var nav_map := RID()
+	if Net.is_host():
+		yard.bake()
+		nav_map = map.bake()
+	Combat.bind_scene(self, Vector3.ZERO, nav_map, map.config(), player.get_rid())
+	World.zone_progress_changed.connect(_on_zone_progress)
+	World.boss_defeated.connect(func(_zone: int) -> void:
+		hud.toast("수호체를 쓰러뜨렸습니다. 에너지 코어를 얻었습니다")
+		sfx.play(&"kill", 0.02))
 
 	World.reset.connect(_refresh_nodes)
 	World.request_rejected.connect(func(reason: String) -> void: _last_reject = reason)
@@ -113,6 +129,10 @@ func _ready() -> void:
 			_save_test(arg.trim_prefix("--savetest="))
 		elif arg.begins_with("--buildshot="):
 			_build_shot(arg.trim_prefix("--buildshot="))
+		elif arg == "--slicetest":
+			_slice_test()
+		elif arg.begins_with("--valleyshot="):
+			_valley_shot(arg.trim_prefix("--valleyshot="))
 		elif arg == "--buildtest":
 			_build_test()
 		elif arg == "--combattest":
@@ -166,8 +186,58 @@ func _unhandled_input(event: InputEvent) -> void:
 		var aim := _aim()
 		if not aim.is_empty() and (aim["position"] as Vector3).distance_to(player.global_position) < 6.0:
 			open_panel(StructureView.structure_id_of(aim["collider"]))
+	elif event.is_action_pressed(&"dev_wave"):
+		if Net.is_host():
+			for spec: Array in [[&"crawler", -6.0], [&"crawler", 6.0], [&"spitter", 0.0]]:
+				Combat.spawn_enemy(spec[0], Vector3(spec[1], 0.2, 66.0))
+			hud.toast("훈련장에 연습용 적이 나왔습니다")
 	elif event.is_action_pressed(&"dev_build_line"):
 		build_next_line()
+
+
+func _on_zone_progress(_zone: int, progress: int) -> void:
+	if progress >= 100:
+		hud.toast("골짜기가 되살아났습니다! 이제 이곳에도 지을 수 있습니다")
+		_refresh_nodes()   # 새로 열린 건축 구역의 경계를 그린다
+	else:
+		hud.toast("골짜기 복원 %d%%" % progress)
+
+
+## 지금 할 일 한 줄(화면 위쪽). 월드의 상태만 보고 정한다.
+func current_goal() -> String:
+	var sim := World.sim
+	var zone := map.zone_index
+	if zone < 0:
+		return ""
+	var has := {"plot": false, "gen": false, "smelter": false, "smelted": false, "miner": false}
+	for p in sim.plots:
+		if p.crop >= 0:
+			has["plot"] = true
+	has["gen"] = not sim.generators.is_empty()
+	for m in sim.crafters:
+		if m.def.id == &"smelter":
+			has["smelter"] = true
+			if m.produced_total > 0:
+				has["smelted"] = true
+		elif m.def.id == &"miner" and m.produced_total > 0 and not m.out_lines.is_empty():
+			has["miner"] = true
+	var steps: Array = [
+		[has["plot"] or has["gen"], "밭을 놓고(B → 자연 탭) E로 빛잎 씨앗을 심으세요"],
+		[has["gen"] and has["smelter"], "작업대(E)에서 빛잎으로 바이오 연료를 만들고, 발전기와 제련기를 지으세요"],
+		[has["smelted"], "광맥을 E로 캐서 제련기에 넣고, 발전기에 연료를 넣어 주괴를 만드세요"],
+		[has["miner"], "채굴기 → 분배기 → 제련기 → 저장소를 벨트로 이어 자동으로 돌리세요"],
+		[sim.boss_defeated(zone), "북쪽 골짜기 끝의 수호체를 쓰러뜨려 에너지 코어를 얻으세요"],
+		[sim.beacon_of(zone) != null, "골짜기 한가운데에 복원 비콘을 세우세요 (에너지 코어 1, 철 주괴 30, 정밀 부품 4)"],
+		[sim.zone_restored(zone), "정화 캡슐(오염 결정 1 + 빛잎 2)을 만들어 비콘에 넣으세요 — 복원 %d%%" % sim.zone_progress(zone)],
+	]
+	# 뒤 단계를 이미 해냈으면 앞 단계는 건너뛴 것으로 본다.
+	var next := 0
+	for i in steps.size():
+		if steps[i][0]:
+			next = i + 1
+	if next >= steps.size():
+		return "목표 완료: 골짜기가 되살아났습니다. 자유롭게 짓고 가꾸세요"
+	return "목표 %d/%d  %s" % [next + 1, steps.size(), steps[next][1]]
 
 
 func open_panel(id: int) -> bool:
@@ -226,6 +296,20 @@ func _process(delta: float) -> void:
 		player.teleport(Vector3(0, 0.05, 0), 0.0)
 	if World.sim == null:
 		return
+	map.update_atmosphere(player.global_position, delta)
+	# E를 누르고 있으면 조준한 광맥·결정을 계속 캔다.
+	_gather_timer -= delta
+	if _gather_timer <= 0.0 and player.is_active() and not build.active and Input.is_action_pressed(&"interact"):
+		var aim := _aim()
+		if not aim.is_empty() and (aim["collider"] as Object).has_meta(&"gather_cell") \
+				and (aim["position"] as Vector3).distance_to(player.global_position) < World.GATHER_RANGE:
+			_gather_timer = 0.25
+			World.request("gather", [(aim["collider"] as Object).get_meta(&"gather_cell")])
+			player.viewmodel.dip(0.4)
+	_goal_timer -= delta
+	if _goal_timer <= 0.0:
+		_goal_timer = 0.5
+		hud.goal_text = current_goal()
 	var role: String = ["소유자", "건설자", "방문자"][Net.role_of(Net.my_id())]
 	var mode := "호스트" if Net.is_host() else "참가자"
 	hud.message = "%s · %s · 접속 %d명 · 틱 %d · 구조물 %d · 적 %d%s%s" % [
@@ -239,18 +323,42 @@ func _refresh_nodes() -> void:
 		c.queue_free()
 	if World.sim == null:
 		return
+	# 광맥과 결정 덩어리: 조준하고 E로 캔다. 채굴기를 올릴 수 있게 낮고 납작하다.
 	for cell: Vector3i in World.sim.nodes:
+		var crystal := Registry.db.item_ids[World.sim.nodes[cell]] == &"taint_crystal"
+		var body := StaticBody3D.new()
+		body.set_meta(&"gather_cell", cell)
+		body.position = Vector3(cell) + Vector3(0.5, 0.0, 0.5)
 		var mi := MeshInstance3D.new()
-		var mesh := CylinderMesh.new()
-		mesh.top_radius = 1.6
-		mesh.bottom_radius = 1.6
-		mesh.height = 0.06
-		mi.mesh = mesh
 		var mat := StandardMaterial3D.new()
-		mat.albedo_color = Color(0.5, 0.35, 0.25)
+		var shape := CylinderShape3D.new()
+		if crystal:
+			var prism := PrismMesh.new()
+			prism.size = Vector3(1.4, 2.0, 1.4)
+			mi.mesh = prism
+			mi.position.y = 1.0
+			mat.albedo_color = Color(0.62, 0.3, 0.85)
+			mat.emission_enabled = true
+			mat.emission = Color(0.45, 0.15, 0.7)
+			shape.radius = 0.7
+			shape.height = 2.0
+		else:
+			var lump := CylinderMesh.new()
+			lump.top_radius = 1.3
+			lump.bottom_radius = 1.6
+			lump.height = 0.35
+			mi.mesh = lump
+			mi.position.y = 0.175
+			mat.albedo_color = Color(0.5, 0.35, 0.25)
+			shape.radius = 1.5
+			shape.height = 0.35
 		mi.material_override = mat
-		mi.position = Vector3(cell) + Vector3(0.5, 0.03, 0.5)
-		_node_markers.add_child(mi)
+		var col := CollisionShape3D.new()
+		col.shape = shape
+		col.position.y = shape.height * 0.5
+		body.add_child(mi)
+		body.add_child(col)
+		_node_markers.add_child(body)
 	# 건축 구역: 높은 단은 실제 지형(발판과 경사로)으로, 가장자리는 띠로 표시한다.
 	for zone in World.sim.build_zones:
 		var zx := float(zone[0])
@@ -316,23 +424,7 @@ func _build_environment() -> void:
 	sun.shadow_enabled = true
 	sun.directional_shadow_max_distance = 120.0
 	add_child(sun)
-	# 바닥. 윗면이 y = 0 이어야 격자 칸과 맞는다.
-	var body := StaticBody3D.new()
-	body.position = Vector3(0, -0.5, 0)
-	var shape := BoxShape3D.new()
-	shape.size = Vector3(400, 1, 400)
-	var col := CollisionShape3D.new()
-	col.shape = shape
-	body.add_child(col)
-	var mesh := BoxMesh.new()
-	mesh.size = shape.size
-	var mi := MeshInstance3D.new()
-	mi.mesh = mesh
-	var mat := ShaderMaterial.new()
-	mat.shader = GRID_SHADER
-	mi.material_override = mat
-	body.add_child(mi)
-	add_child(body)
+	_env = env
 
 
 # ---------------------------------------------------------------------------
@@ -592,8 +684,8 @@ func _save_test(mode: String) -> void:
 		player.teleport(Vector3(-6, 0.25, -5), 1.25)
 		await _wait(0.4)   # 내 위치가 호스트에 알려진 뒤에 요청한다(거리 검사)
 		build_line(World.DEV_LINE_ORIGINS[0])
-		World.request_place(&"plot", Vector3i(3, 0, -6), 0)
-		World.request("plant", [World.sim.occupancy.get(Vector3i(3, 0, -6), 0), "glowleaf_seed"])
+		World.request_place(&"plot", Vector3i(7, 0, -9), 0)
+		World.request("plant", [World.sim.occupancy.get(Vector3i(7, 0, -9), 0), "glowleaf_seed"])
 		World.request_place(&"floor", Vector3i(-8, 0, -8), 0)
 		World.request_place_free(&"lamp", Vector3(-6.5, 0.2, -6.5), 45)
 		while World.sim.tick_count < 150:
@@ -869,6 +961,197 @@ func _build_shot(path: String) -> void:
 		player.teleport(Vector3(36, 0.05, -14), -1.9)
 	player.pitch = deg_to_rad(-12.0)
 	await _wait(1.2)
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(path)
+	get_tree().quit()
+
+
+# ---------------------------------------------------------------------------
+# 버티컬 슬라이스 흐름 점검 (혼자, 화면 없이): `godot --headless -- --single --slicetest`
+# 정원 → 골짜기 → 수호체 → 비콘 → 복원까지 핵심 고리를 한 번 돈다(기다림은 지급으로 건너뛴다).
+# ---------------------------------------------------------------------------
+
+func _slice_test() -> void:
+	var errors: PackedStringArray = []
+	var zone := map.zone_index
+	player.force_active = true
+	Save.autosave_enabled = false
+	var hazards: Array = []
+	Combat.hazard_spawned.connect(func(pos: Vector3, _r: float, _d: float) -> void: hazards.append(pos))
+	await _wait(0.6)
+	if not current_goal().contains("밭"):
+		errors.append("첫 목표가 밭이 아님: %s" % current_goal())
+
+	# 정원: 광맥을 손으로 캔다. 연달아는 못 캔다.
+	player.teleport(Vector3(-23, 0.4, -21), 0.0)
+	await _wait(0.4)
+	World.request("gather", [Vector3i(-23, 0, -24)])
+	World.request("gather", [Vector3i(-23, 0, -24)])
+	if World.my_count(&"iron_ore") != 1 or _last_reject != "not_ready":
+		errors.append("손 채굴: 광석 %d, 거절 사유 '%s'" % [World.my_count(&"iron_ore"), _last_reject])
+
+	# 처음부터 놓여 있는 작업대에서 정화 캡슐을 만든다.
+	player.teleport(Vector3(2, 0.05, -4), 0.0)
+	await _wait(0.4)
+	var bench: int = World.sim.occupancy.get(Vector3i(3, 0, -6), 0)
+	World.grant(1, {"taint_crystal": 1, "glowleaf": 2})
+	if not open_panel(bench):
+		errors.append("정원의 작업대가 없음")
+	else:
+		panel.act("craft", ["make_capsule", 1])
+		_close_panel()
+	if World.my_count(&"purifier_capsule") != 1:
+		errors.append("캡슐 제작 실패")
+
+	# 골짜기: 들어서면 적이 나온다. 길찾기 경로가 있다.
+	player.teleport(Vector3(0, 0.05, -200), 0.0)
+	await _wait(1.5)
+	if Combat.enemies.is_empty():
+		errors.append("골짜기에 들어섰는데 적이 나오지 않음")
+	if Combat.find_path(Vector3(-22, 0, -210), Vector3(-22, 0, -220)).size() < 2:
+		errors.append("골짜기 길찾기 경로가 없음")
+	if Combat.spawn_cap() != 3:
+		errors.append("복원 전 출현 한도 %d (기대 3)" % Combat.spawn_cap())
+	# 결정 덩어리 캐기.
+	player.teleport(Vector3(-12, 0.05, -233.5), 0.0)
+	await _wait(0.3)
+	World.request("gather", [Vector3i(-12, 0, -236)])
+	if World.my_count(&"taint_crystal") != 1:
+		errors.append("결정 채집 실패 (%d개, 거절 '%s')" % [World.my_count(&"taint_crystal"), _last_reject])
+
+	# 수호체: 터에 들어서면 나타나고, 돌진과 포격으로 공격한다.
+	Combat.activation_range = 0.0          # 졸개가 끼어들지 않게 일반 출현을 멈춘다
+	for id: int in Combat.enemies.keys():
+		Combat._damage_enemy(Combat.enemies[id], 99999.0, 1)
+	await _wait(5.5)                        # 체력 회복
+	player.teleport(Vector3(0, 0.05, -292), 0.0)
+	await _wait(1.0)
+	var boss := Combat.boss()
+	if boss == null:
+		errors.append("수호체가 나타나지 않음")
+	else:
+		if not is_equal_approx(boss.max_hp, 1500.0):
+			errors.append("수호체 체력 %.0f (기대 1500)" % boss.max_hp)
+		var waited := 0.0
+		while waited < 14.0 and (hazards.is_empty() or Combat.my_vitals().hp >= CombatRules.MAX_HP):
+			await _wait(0.25)
+			waited += 0.25
+		if hazards.is_empty():
+			errors.append("수호체가 14초 동안 포격하지 않음")
+		if Combat.my_vitals().hp >= CombatRules.MAX_HP:
+			errors.append("수호체가 14초 동안 피해를 주지 못함")
+		# 약점이 드러나면 두 배로 아프다.
+		boss = Combat.boss()
+		if boss != null:
+			var before := boss.hp
+			boss.stunned = true
+			Combat._damage_enemy(boss, 100.0, 1)
+			if not is_equal_approx(before - boss.hp, 200.0):
+				errors.append("약점 노출 시 피해 %.0f (기대 200)" % (before - boss.hp))
+			boss.stunned = false
+			# 체력 66%, 33%에서 졸개 셋씩.
+			Combat._damage_enemy(boss, boss.hp - boss.max_hp * 0.6, 1)
+			var after_first := Combat.enemies.size() - 1
+			Combat._damage_enemy(boss, boss.hp - boss.max_hp * 0.3, 1)
+			var after_second := Combat.enemies.size() - 1
+			if after_first != 3 or after_second != 6:
+				errors.append("소환: 66%%에서 %d마리, 33%%에서 누적 %d마리 (기대 3, 6)" % [after_first, after_second])
+			Combat._damage_enemy(boss, 99999.0, 1)
+	for id: int in Combat.enemies.keys():
+		Combat._damage_enemy(Combat.enemies[id], 99999.0, 1)
+	await _wait(1.5)
+	if not World.sim.boss_defeated(zone) or World.my_count(&"energy_core") != 1:
+		errors.append("수호체 처치 뒤 코어 %d개, 처치 기록 %s" % [World.my_count(&"energy_core"), World.sim.boss_defeated(zone)])
+	if Combat.boss() != null:
+		errors.append("쓰러뜨린 수호체가 다시 나타남")
+	if not current_goal().contains("비콘"):
+		errors.append("수호체 처치 뒤 목표: %s" % current_goal())
+
+	# 비콘: 정해진 자리에만 선다.
+	World.grant(1, {"iron_ingot": 30, "precision_part": 4, "purifier_capsule": 9})
+	var site := Registry.db.zones[zone].beacon_site
+	player.teleport(Vector3(site) + Vector3(1.5, 0.05, 7), 0.0)
+	await _wait(0.4)
+	build.set_active(true)
+	build.select(&"beacon")
+	build.update_target(Vector3(20, 0, -240), Vector3.UP, true)
+	if build.reason != "not_buildable" and build.reason != "needs_site":
+		errors.append("엉뚱한 자리의 비콘이 '%s'" % build.reason)
+	build.update_target(Vector3(site) + Vector3(2.5, 0, 0.5), Vector3.UP, true)
+	if build.reason != "":
+		errors.append("비콘 자리에서 '%s'" % build.reason)
+	build.confirm()
+	build.set_active(false)
+	var beacon := World.sim.beacon_of(zone)
+	if beacon == null or World.my_count(&"energy_core") != 0:
+		errors.append("비콘 설치 실패 (코어 %d)" % World.my_count(&"energy_core"))
+	else:
+		# 캡슐 10개로 복원한다.
+		var inside := Vector3i(-40, 0, -300)
+		if World.sim.can_place(&"storage", inside, 0) != "not_buildable":
+			errors.append("복원 전인데 골짜기에 지을 수 있음")
+		open_panel(beacon.id)
+		panel.act("insert", [beacon.id, "purifier_capsule", 4])
+		if World.sim.zone_progress(zone) != 40 or Combat.spawn_cap() != 3:
+			errors.append("캡슐 4개 뒤 진행도 %d, 출현 한도 %d" % [World.sim.zone_progress(zone), Combat.spawn_cap()])
+		panel.act("insert", [beacon.id, "purifier_capsule", 9999])
+		_close_panel()
+		if not World.sim.zone_restored(zone) or World.my_count(&"purifier_capsule") != 0:
+			errors.append("캡슐 10개 뒤 진행도 %d, 남은 캡슐 %d" % [World.sim.zone_progress(zone), World.my_count(&"purifier_capsule")])
+		if World.sim.can_place(&"storage", inside, 0) != "":
+			errors.append("복원 뒤 골짜기 건축이 '%s'" % World.sim.can_place(&"storage", inside, 0))
+		if Combat.spawn_cap() != 0:
+			errors.append("복원 뒤에도 적이 나옴")
+		await _wait(9.5)
+		var bloomed := 0
+		for f: Array in map._flora:
+			if (f[0] as Node3D).visible:
+				bloomed += 1
+		if bloomed != map._flora.size():
+			errors.append("복원 뒤 식생 %d / %d" % [bloomed, map._flora.size()])
+		if not current_goal().contains("완료"):
+			errors.append("복원 뒤 목표: %s" % current_goal())
+
+	# 무기 개조: 확장 탄창이 있으면 소총 탄창이 40발.
+	World.grant(1, {"ext_mag": 1})
+	player.equip_by_id(&"rifle")
+	if player.gun.capacity() != 40:
+		errors.append("확장 탄창 뒤 소총 탄창 %d" % player.gun.capacity())
+
+	# 이 상태를 저장하고 다시 읽을 수 있다.
+	if not Save.save_now(true):
+		errors.append("저장 실패")
+	else:
+		var loaded := Save.load_world(Save.world_id)
+		if loaded.is_empty() or not (loaded["sim"] as SimWorld).zone_restored(zone) \
+				or (loaded["sim"] as SimWorld).state_hash() != World.sim.state_hash():
+			errors.append("저장한 복원 상태를 다시 읽지 못함")
+
+	if errors.is_empty():
+		print("SLICETEST OK")
+	else:
+		for e in errors:
+			print("SLICETEST FAIL: %s" % e)
+	get_tree().quit(0 if errors.is_empty() else 1)
+
+
+## 골짜기 화면을 저장한다(렌더링 확인용). 파일 이름에 restored가 있으면 복원된 모습.
+func _valley_shot(path: String) -> void:
+	player.force_active = true
+	Combat.auto_spawn = false
+	player.teleport(Vector3(0, 6.0, -196), 0.0)
+	player.gravity = 0.0
+	player.pitch = deg_to_rad(-14.0)
+	await _wait(0.5)
+	if path.contains("restored"):
+		World.sim.restore[map.zone_index] = 100
+		World._check_zones()
+		await _wait(9.5)
+	else:
+		Combat.spawn_enemy(&"warden", Vector3(0, 0.2, -230))
+		Combat.spawn_enemy(&"crawler", Vector3(-8, 0.2, -212))
+		Combat.spawn_enemy(&"spitter", Vector3(10, 0.2, -216))
+		await _wait(1.0)
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(path)
 	get_tree().quit()

@@ -57,3 +57,6 @@ var watered: bool = false        ## 물을 주면 다음 성장 단계까지 두
 # --- 장식(자유 배치): 위치는 밀리미터, 방향은 도. 정수로 저장해 모든 피어에서 같게 한다 ---
 var free_pos: Vector3i = Vector3i.ZERO
 var free_yaw: int = 0
+
+# --- 복원 비콘 ---
+var zone: int = -1               ## 이 비콘이 복원하는 구역의 인덱스

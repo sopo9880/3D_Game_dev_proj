@@ -17,6 +17,7 @@ const KIND_COLORS: Dictionary[int, Color] = {
 	StructureDef.Kind.PLOT: Color(0.36, 0.26, 0.18),
 	StructureDef.Kind.WORKBENCH: Color(0.6, 0.45, 0.3),
 	StructureDef.Kind.DECOR: Color(0.75, 0.6, 0.45),
+	StructureDef.Kind.BEACON: Color(0.35, 0.85, 0.75),
 	-2: Color(0.35, 0.85, 0.5),
 }
 const ITEM_COLORS: Array[Color] = [
@@ -202,7 +203,7 @@ func _add(s: SimStructure) -> void:
 				light.position = top + Vector3(0, 0.2, 0)
 				root.add_child(light)
 	if s.kind in [StructureDef.Kind.CRAFTER, StructureDef.Kind.STORAGE, StructureDef.Kind.GENERATOR,
-			StructureDef.Kind.PLOT, StructureDef.Kind.WORKBENCH]:
+			StructureDef.Kind.PLOT, StructureDef.Kind.WORKBENCH, StructureDef.Kind.BEACON]:
 		var label := Label3D.new()
 		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		label.pixel_size = 0.005
@@ -301,6 +302,8 @@ func _process(_delta: float) -> void:
 				_labels[id].text = "보관 %d" % total
 			StructureDef.Kind.GENERATOR:
 				_labels[id].text = "연료 %d%s" % [s.fuel_count, " · 연소 중" if s.burn_left > 0 else ""]
+			StructureDef.Kind.BEACON:
+				_labels[id].text = "복원 %d%%" % sim.zone_progress(s.zone)
 			StructureDef.Kind.PLOT:
 				var plant: MeshInstance3D = _plants.get(id)
 				if s.crop < 0:

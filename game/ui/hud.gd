@@ -10,6 +10,7 @@ var grenades: int = -1
 var side_text: String = ""        ## 오른쪽 가운데(소지품 등)
 var center_text: String = ""      ## 화면 가운데 큰 안내(쓰러짐 등)
 var build_text: String = ""       ## 건축 모드 안내(조준선 아래)
+var goal_text: String = ""        ## 지금 할 일(화면 위쪽)
 
 var _hit_time: float = 0.0
 var _hit_color: Color = Color.WHITE
@@ -23,6 +24,7 @@ var _side: Label
 var _center: Label
 var _toast: Label
 var _build: Label
+var _goal: Label
 var _toast_time: float = 0.0
 var _hurt: float = 0.0
 var _help_open: bool = true
@@ -54,6 +56,10 @@ func _ready() -> void:
 	_build = _label(Control.PRESET_CENTER, 18, HORIZONTAL_ALIGNMENT_CENTER)
 	_build.anchor_top = 0.6
 	_build.anchor_bottom = 0.6
+	_goal = _label(Control.PRESET_CENTER_TOP, 20, HORIZONTAL_ALIGNMENT_CENTER)
+	_goal.offset_top = 84.0
+	_goal.offset_bottom = 84.0
+	_goal.add_theme_color_override(&"font_color", Color(1.0, 0.93, 0.6))
 	_help.text = "\n".join([
 		"WASD 이동 · Shift 달리기 · Space 점프 (턱 앞에서 앞으로 밀면 올라타기) · Ctrl/C 앉기 (달리다 앉으면 슬라이딩) · 벽 옆에서 달리며 점프 = 벽 달리기, 다시 점프 = 벽 차기",
 		"좌클릭 사격 · 우클릭 조준 · R 재장전 · V 근접 공격 · 1/2/3 또는 휠 무기 교체 · 높은 턱은 매달리기",
@@ -109,6 +115,7 @@ func _process(delta: float) -> void:
 	_side.text = side_text
 	_center.text = center_text
 	_build.text = build_text
+	_goal.text = goal_text
 	_toast_time = maxf(_toast_time - delta, 0.0)
 	_toast.modulate.a = clampf(_toast_time, 0.0, 1.0)
 	_hurt = maxf(_hurt - delta * 2.5, 0.0)

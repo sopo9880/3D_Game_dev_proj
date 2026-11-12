@@ -49,7 +49,7 @@ res://
 │   ├─ world.gd            # 틱, 요청 검증, 이벤트 방송, 스냅샷, 위치 중계
 │   ├─ combat.gd           # 체력, 사격 검증, 적 생성·동기화, 투사체, 전리품
 │   └─ save.gd             # 자동 저장, 스레드 쓰기, 불러오기
-├─ data/                   # items.json, recipes.json, structures.json, weapons.json
+├─ data/                   # items, recipes, structures, crops, zones, enemies, weapons, profiles, rules, map_slice (.json)
 ├─ sim/                    # ★ 순수 로직. Node, 씬 트리, 오토로드 접근 금지
 │   ├─ content/            # ContentDB, ItemDef, RecipeDef, StructureDef
 │   ├─ sim_world.gd        # 설치·철거·받침, 소지품·비용·제작, 밭, tick(), 토폴로지, 직렬화
@@ -62,7 +62,7 @@ res://
 │   ├─ build/              # 건축 모드(미리보기, 벨트 경로, 되돌리기)
 │   ├─ combat/             # CombatRules(씬과 무관한 전투 계산)
 │   ├─ enemies/            # EnemyDef, Enemy(호스트 AI + 클라이언트 꼭두각시)
-│   ├─ world/              # 개발용 샌드박스, 전투 구역, 전투 화면 연결, 다른 플레이어 아바타
+│   ├─ world/              # 게임 씬(sandbox), 슬라이스 맵(정원·길·골짜기와 복원 연출), 훈련장, 전투 화면 연결, 아바타
 │   ├─ factory_view/       # 구조물과 벨트 물건 그리기
 │   ├─ range/              # 사격 감각 테스트용 사격장
 │   ├─ ui/                 # HUD, 수치 조정 패널, 설비 패널
@@ -145,7 +145,8 @@ res://
 | `craft` | 작업대 손 제작 |
 | `plant` `water` `harvest` | 밭 |
 | `consume` | 탄약 사용(재장전할 때) |
-| `join` `grant` | 호스트 내부용: 플레이어 등록(시작 지급품), 전리품 지급 |
+| `gather` | 광맥·결정 덩어리를 손으로 캔다(5m 안, 자리마다 대기 시간) |
+| `join` `grant` `boss` | 호스트 내부용: 플레이어 등록(시작 지급품), 전리품 지급, 우두머리 처치 기록과 코어 지급 |
 
 ### 공장 상태 복제 (구현됨)
 

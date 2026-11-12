@@ -143,3 +143,17 @@ func test_format_2_fixture_migrates_with_everything_intact() -> void:
 	eq(w.plot_state(w.plots[0]), "growing", "자라던 작물")
 	check(w.build_zones.is_empty(), "구역이 없으면 전체가 평지")
 	eq(w.can_place(&"storage", Vector3i(100, 0, 100), 0), "", "어디든 지을 수 있다")
+
+
+## 형식 3(v0.3.x, 구역 복원이 없던 때)의 세이브도 그대로 불러온다.
+func test_format_3_fixture_migrates_with_zones_intact() -> void:
+	var old: Variant = bytes_to_var(FileAccess.get_file_as_bytes("res://tests/fixtures/sim_format_3.bin"))
+	check(old is Dictionary and int((old as Dictionary).get("format", 0)) == 3, "형식 3 샘플")
+	var w := SimWorld.from_dict(db, SaveMigrations.migrate_sim(old))
+	check(w != null, "불러오기")
+	eq(w.structures.size(), 19, "구조물 19개")
+	eq(w.build_zones.size(), 2, "건축 구역 2개")
+	eq(w.ground_y(101, 1), 3, "높은 단")
+	check(w.occupancy.has(Vector3i(102, 3, 2)), "단 위의 저장소")
+	eq(w.zone_progress(0), 0, "복원은 처음부터")
+	check(not w.boss_defeated(0), "우두머리는 살아 있다")

@@ -15,6 +15,8 @@ signal desynced(tick: int)
 signal inventory_changed                       ## 누군가의 소지품이 바뀌었을 수 있다
 signal items_gained(key: String, items: Dictionary)   ## 수확·전리품으로 얻음(아이템 ID → 수량)
 signal consumed(key: String, item_id: StringName, count: int)
+signal zone_progress_changed(zone: int, progress: int)
+signal boss_defeated(zone: int)
 signal spawn_assigned(pos: Vector3, yaw: float)  ## 저장된 내 위치를 호스트가 알려 줬다
 signal remote_player_state(peer_id: int, pos: Vector3, yaw: float, pitch: float, crouch: bool)
 
@@ -26,8 +28,8 @@ const MAX_BELT_CELLS := 256
 const USE_RANGE := 10.0          ## 구조물을 쓰려면 이 거리 안에 있어야 한다
 const MAX_PLAYER_SPEED := 40.0   ## m/s. 이보다 빠른 이동 보고는 무시한다.
 ## 개발용 월드의 광맥 자리(기준 생산 라인의 원점). 실제 맵이 생기면 맵 데이터로 대체한다.
-## 개발용 월드의 건축 구역: [x, z, 폭, 깊이, 지면 높이]. 정원 평지와 3m 높은 단 하나.
-const DEV_BUILD_ZONES: Array[Array] = [[-44, -64, 88, 76, 0], [48, -40, 28, 28, 3]]
+const MAP_PATH := "res://data/map_slice.json"
+const GATHER_RANGE := 5.0
 ## 개발용 부하 시험 구역: 기준 생산 라인을 격자로 깐다(프레임 측정용).
 const DEV_STRESS_ZONE: Array[int] = [-184, 88, 368, 96, 0]
 const DEV_STRESS_LINES := 72     ## 설비 504개
@@ -41,6 +43,8 @@ var tick_enabled: bool = true     ## 끄면 호스트가 틱을 돌리지 않는
 var resync_count: int = 0
 
 var _accum: float = 0.0
+var _map: Dictionary = {}
+var _zone_seen: Dictionary[int, int] = {}
 var _target_tick: int = 0
 var _synced: Array[int] = []                       ## 호스트: 스냅샷을 받은 피어
 var _snapshot_parts: Array[PackedByteArray] = []   ## 클라이언트: 받는 중인 스냅샷
@@ -58,21 +62,46 @@ var _last_player_time: Dictionary[int, float] = {}
 func start_new() -> void:
 	sim = SimWorld.new(Registry.db)
 	saved_positions = {}
-	for z: Array in DEV_BUILD_ZONES:
-		sim.add_build_zone(z[0], z[1], z[2], z[3], z[4])
-	for origin in DEV_LINE_ORIGINS:
-		sim.add_node(origin + ReferenceLine.NODE_CELL, &"iron_ore")
+	# 맵 데이터: 건축 구역, 광맥과 결정 덩어리, 처음부터 놓여 있는 구조물.
+	for z: Array in map_data().get("build_zones", []):
+		sim.add_build_zone(int(z[0]), int(z[1]), int(z[2]), int(z[3]), int(z[4]))
+	for n: Array in map_data().get("nodes", []):
+		sim.add_node(Vector3i(int(n[0]), int(n[1]), int(n[2])), StringName(str(n[3])))
+	for st: Array in map_data().get("structures", []):
+		sim.place(StringName(str(st[0])), Vector3i(int(st[1]), int(st[2]), int(st[3])), int(st[4]), "world")
 	sim.ensure_player(_player_key(1))
 	_synced.clear()
 	_accum = 0.0
+	_zone_seen.clear()
 	running = true
 	reset.emit()
+
+
+## 맵 데이터(data/map_slice.json). 지형은 씬이 만들고, 규칙에 필요한 좌표만 여기 있다.
+func map_data() -> Dictionary:
+	if _map.is_empty():
+		var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(MAP_PATH))
+		if parsed is Dictionary:
+			_map = parsed
+		else:
+			push_error("[World] 맵 데이터를 읽을 수 없음: %s" % MAP_PATH)
+	return _map
+
+
+## 구역 진행도가 바뀌었으면 알린다(이벤트로도, 벨트로 캡슐이 들어가는 틱에서도 바뀔 수 있다).
+func _check_zones() -> void:
+	for z in Registry.db.zones:
+		var p := sim.zone_progress(z.index)
+		if p != int(_zone_seen.get(z.index, 0)):
+			_zone_seen[z.index] = p
+			zone_progress_changed.emit(z.index, p)
 
 
 ## 저장된 월드로 시작한다.
 func start_loaded(loaded: SimWorld, players: Dictionary) -> void:
 	sim = loaded
 	saved_positions = players.duplicate(true)
+	_zone_seen.clear()
 	sim.ensure_player(_player_key(1))
 	_synced.clear()
 	_accum = 0.0
@@ -140,6 +169,7 @@ func _physics_process(delta: float) -> void:
 				var h := sim.state_hash()
 				for p in _synced:
 					_ev_checksum.rpc_id(p, sim.tick_count, h)
+			_check_zones()
 			ticked.emit(sim.tick_count)
 	else:
 		# 밀렸으면 한 프레임에 여러 틱을 따라잡되, 화면이 멈추지 않게 상한을 둔다.
@@ -153,6 +183,7 @@ func _physics_process(delta: float) -> void:
 
 func _tick_client() -> void:
 	sim.tick()
+	_check_zones()
 	_accum = 0.0
 	ticked.emit(sim.tick_count)
 
@@ -230,6 +261,16 @@ func dev_stress() -> int:
 	var before := sim.structures.size() - sim.belts.size()
 	_emit_event("stress", [DEV_STRESS_LINES])
 	return sim.structures.size() - sim.belts.size() - before
+
+
+## 호스트: 구역의 우두머리가 쓰러졌다. 근처에 있던 플레이어 모두에게 에너지 코어를 준다.
+func report_boss_defeated(zone: int, peers: Array[int]) -> void:
+	if not multiplayer.is_server() or not running:
+		return
+	var keys: Array[String] = []
+	for p in peers:
+		keys.append(_player_key(p))
+	_emit_event("boss", [zone, keys])
 
 
 ## 호스트: 아이템을 준다(전리품 등). items는 아이템 ID(문자열) → 수량.
@@ -342,6 +383,16 @@ func _do(sender: int, op: String, a: Array) -> void:
 			if not _types(a, [TYPE_STRING, TYPE_INT]) or a[1] <= 0 or a[1] > 1000:
 				why = "bad_request"
 			ev = [a[0], a[1], by]
+		"gather":
+			if not _types(a, [TYPE_VECTOR3I]) or not _cell_ok(a[0]):
+				why = "bad_request"
+			elif not sim.nodes.has(a[0]) or not Registry.db.gather_ticks.has(sim.nodes[a[0]]):
+				why = "not_found"
+			elif not _near(sender, Vector3(a[0]) + Vector3(0.5, 0, 0.5), GATHER_RANGE):
+				why = "too_far"
+			elif sim.tick_count < int(sim.gather_ready.get(a[0], 0)):
+				why = "not_ready"
+			ev = [a[0], by]
 		_:
 			why = "bad_request"
 	if why != "":
@@ -459,6 +510,17 @@ func _apply(op: String, a: Array) -> void:
 		"consume":
 			var n := sim.inv_remove(a[2], db.item_index(StringName(a[0])), a[1])
 			consumed.emit(a[2], StringName(a[0]), n)
+		"gather":
+			var item := sim.gather(a[1], a[0])
+			if item >= 0:
+				items_gained.emit(a[1], {String(db.item_ids[item]): 1})
+		"boss":
+			sim.set_boss_defeated(a[0])
+			var core := db.item_index(&"energy_core")
+			for key: String in a[1]:
+				sim.inv_add(key, core, 1)
+				items_gained.emit(key, {"energy_core": 1})
+			boss_defeated.emit(a[0])
 		"stress":
 			_apply_stress(a[0])
 			reset.emit()
@@ -469,6 +531,7 @@ func _apply(op: String, a: Array) -> void:
 			for id: String in items:
 				sim.inv_add(a[0], db.item_index(StringName(id)), int(items[id]))
 			items_gained.emit(a[0], items)
+	_check_zones()
 	inventory_changed.emit()
 
 

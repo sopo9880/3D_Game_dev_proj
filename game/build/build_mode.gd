@@ -10,7 +10,7 @@ const UNDO_LIMIT := 20
 ## 지을 수 있는 것들. 탭은 데이터의 tab 값으로 나뉜다.
 const CATALOG: Array[StringName] = [
 	&"floor", &"wall", &"stairs", &"roof",
-	&"belt", &"junction", &"miner", &"smelter", &"assembler", &"storage", &"bio_generator", &"power_pole", &"workbench",
+	&"belt", &"junction", &"miner", &"smelter", &"assembler", &"storage", &"bio_generator", &"power_pole", &"workbench", &"beacon",
 	&"plot", &"planter", &"fence",
 	&"chair", &"table", &"lamp",
 ]
@@ -24,7 +24,7 @@ const REASONS: Dictionary[String, String] = {
 	"too_far": "너무 멀다", "not_adjacent": "벨트가 이어지지 않음", "no_target": "설치할 곳을 조준하세요",
 	"too_many": "장식이 너무 많음", "need_workbench": "작업대 근처에서만", "not_found": "대상이 없음",
 	"bad_request": "잘못된 요청", "unknown_structure": "모르는 구조물", "full": "가득 참",
-	"not_buildable": "건축할 수 없는 땅",
+	"not_buildable": "건축할 수 없는 땅", "needs_site": "골짜기의 비콘 자리에만 설치", "not_ready": "아직 캘 수 없음",
 }
 
 var player: PlayerController
@@ -213,6 +213,14 @@ func update_target(hit_pos: Vector3, hit_normal: Vector3, has_hit: bool) -> void
 				var path := belt_path(_belt_start, Vector3i(c.x, (_belt_start as Vector3i).y, c.z))
 				_target = {"path": path}
 				reason = sim.can_place_belt(path, rot if path.size() == 1 else -1)
+		StructureDef.Kind.BEACON:
+			# 비콘은 정해진 자리에만 선다. 그 근처를 조준하면 자리에 맞춰 준다.
+			var cell := c
+			for z in Registry.db.zones:
+				if Vector3(z.beacon_site + Vector3i(1, 0, 1)).distance_to(p) < 8.0:
+					cell = z.beacon_site
+			_target = {"cell": cell, "rot": 0}
+			reason = sim.can_place(def.id, cell, 0)
 		_:
 			var half := Vector3i(def.footprint.x / 2, 0, def.footprint.z / 2)
 			var cell := c - SimWorld.rotate_cell(half, rot)
