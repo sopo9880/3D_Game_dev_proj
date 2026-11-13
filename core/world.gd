@@ -56,6 +56,10 @@ var yaws: Dictionary[int, float] = {}
 var saved_positions: Dictionary = {}
 ## 클라이언트: 호스트가 알려 준 내 시작 위치([위치, yaw]). 없으면 빈 배열.
 var my_spawn: Array = []
+## 월드 설정(세이브에 저장). 지금은 난이도뿐이다.
+var settings: Dictionary = {"difficulty": "normal"}
+const DIFFICULTIES: Array[String] = ["easy", "normal", "hard"]
+const DIFFICULTY_NAMES: Dictionary[String, String] = {"easy": "쉬움", "normal": "보통", "hard": "어려움"}
 var _last_player_time: Dictionary[int, float] = {}
 
 
@@ -98,8 +102,12 @@ func _check_zones() -> void:
 
 
 ## 저장된 월드로 시작한다.
-func start_loaded(loaded: SimWorld, players: Dictionary) -> void:
+func start_loaded(loaded: SimWorld, players: Dictionary, saved_settings: Dictionary = {}) -> void:
 	sim = loaded
+	settings = {"difficulty": "normal"}
+	settings.merge(saved_settings, true)
+	if not DIFFICULTIES.has(str(settings.get("difficulty"))):
+		settings["difficulty"] = "normal"
 	saved_positions = players.duplicate(true)
 	_zone_seen.clear()
 	sim.ensure_player(_player_key(1))
@@ -107,6 +115,22 @@ func start_loaded(loaded: SimWorld, players: Dictionary) -> void:
 	_accum = 0.0
 	running = true
 	reset.emit()
+
+
+## 적의 체력·피해 배율 [체력, 피해].
+func difficulty_mult() -> Array:
+	var table: Dictionary = Registry.db.difficulty
+	return table.get(str(settings.get("difficulty", "normal")), [1.0, 1.0])
+
+
+func difficulty_name() -> String:
+	return DIFFICULTY_NAMES.get(str(settings.get("difficulty", "normal")), "?")
+
+
+## 호스트: 난이도를 다음 단계로 바꾼다. 이미 나와 있는 적에는 적용되지 않는다.
+func cycle_difficulty() -> void:
+	var i := DIFFICULTIES.find(str(settings.get("difficulty", "normal")))
+	settings["difficulty"] = DIFFICULTIES[(i + 1) % DIFFICULTIES.size()]
 
 
 ## 저장할 플레이어 위치: 지금 접속 중인 사람은 현재 위치, 나간 사람은 마지막 위치.

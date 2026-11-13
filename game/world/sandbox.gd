@@ -29,6 +29,7 @@ var _goal_timer: float = 0.0
 var combat_view: CombatView
 var build: BuildMode
 var panel: StructurePanel
+var pause: PauseMenu
 
 
 func _ready() -> void:
@@ -79,7 +80,7 @@ func _ready() -> void:
 		"B 건축 모드 (Tab 탭 · 휠 선택 · R 회전 · 좌클릭 설치 · X 철거 · F 같은 것 고르기 · Z 되돌리기 · Esc 닫기) · E 설비 열기",
 		"노란 띠 안쪽이 건축 구역. 화살표는 설비의 입력(파랑)과 출력(주황)",
 		"N 기준 생산 라인 한 벌 · F9 부하 시험(설비 504개를 한 번에, 프레임 측정용) — 개발용, 호스트만 · Esc 마우스 풀기",
-		"F6 저장 · F10 저장하고 나가기 (5분마다 자동 저장)",
+		"Esc 메뉴(설정, 저장, 나가기) · F6 저장 · F7 난이도(호스트) · 5분마다 자동 저장",
 	]
 	layer.add_child(hud)
 	hud.collapse_help()
@@ -91,6 +92,12 @@ func _ready() -> void:
 	add_child(build)
 	panel = StructurePanel.new()
 	layer.add_child(panel)
+	pause = PauseMenu.new()
+	layer.add_child(pause)
+	pause.resumed.connect(func() -> void: player.input_enabled = true)
+	pause.leave_requested.connect(func() -> void: Net.leave())
+	Settings.changed.connect(_apply_settings)
+	_apply_settings()
 	combat_view = CombatView.new()
 	combat_view.player = player
 	combat_view.hud = hud
@@ -118,6 +125,7 @@ func _ready() -> void:
 		if arg.begins_with("--nettest="):
 			_nettest = arg.trim_prefix("--nettest=")
 			player.force_active = true
+			World.settings["difficulty"] = "easy"
 			Combat.auto_spawn = false
 			Combat.enemy_died.connect(func(_i: int, _p: Vector3, _k: int) -> void: _nettest_died += 1)
 			if _nettest == "host":
@@ -156,8 +164,20 @@ func _unhandled_input(event: InputEvent) -> void:
 			_close_panel()
 			get_viewport().set_input_as_handled()
 		return
+	if pause.visible:
+		if event.is_action_pressed(&"pause"):
+			pause.close()
+			get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed(&"pause"):
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		player.input_enabled = false
+		pause.open()
+	elif event.is_action_pressed(&"cycle_difficulty"):
+		if Net.is_host():
+			World.cycle_difficulty()
+			hud.toast("난이도: %s (새로 나오는 적부터 적용)" % World.difficulty_name())
+		else:
+			hud.toast("난이도는 호스트가 바꿉니다")
 	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		get_viewport().set_input_as_handled()
@@ -193,6 +213,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			hud.toast("훈련장에 연습용 적이 나왔습니다")
 	elif event.is_action_pressed(&"dev_build_line"):
 		build_next_line()
+
+
+func _apply_settings() -> void:
+	player.sens_mult = float(Settings.get_value("sens"))
+	player.base_fov = float(Settings.get_value("fov"))
 
 
 func _on_zone_progress(_zone: int, progress: int) -> void:
@@ -312,8 +337,8 @@ func _process(delta: float) -> void:
 		hud.goal_text = current_goal()
 	var role: String = ["소유자", "건설자", "방문자"][Net.role_of(Net.my_id())]
 	var mode := "호스트" if Net.is_host() else "참가자"
-	hud.message = "%s · %s · 접속 %d명 · 틱 %d · 구조물 %d · 적 %d%s%s" % [
-		mode, role, Net.players.size(), World.sim.tick_count, World.sim.structures.size(), Combat.enemies.size(),
+	hud.message = "%s · %s · 접속 %d명 · 난이도 %s · 구조물 %d · 적 %d%s%s" % [
+		mode, role, Net.players.size(), World.difficulty_name() if Net.is_host() else "호스트 설정", World.sim.structures.size(), Combat.enemies.size(),
 		" · 재동기화 %d회" % World.resync_count if World.resync_count > 0 else "",
 		" · 거절: %s" % _last_reject if _last_reject != "" else ""]
 
@@ -505,6 +530,7 @@ func _shot(path: String) -> void:
 
 func _combat_test() -> void:
 	var errors: PackedStringArray = []
+	World.settings["difficulty"] = "easy"   # 기준 수치로 점검한다
 	player.force_active = true
 	Combat.auto_spawn = false
 	await _wait(0.5)
@@ -540,6 +566,18 @@ func _combat_test() -> void:
 		errors.append("소총 %d발로 돌진형을 처치하지 못함" % shots)
 	elif shots < 4 or shots > 12:
 		errors.append("돌진형 처치에 %d발 (체력 60, 피해 12 → 5발 안팎이어야 함)" % shots)
+
+	# 난이도: "보통"에서는 적 체력 1.35배, 받는 피해 1.3배.
+	World.settings["difficulty"] = "normal"
+	var tough := Combat.spawn_enemy(&"crawler", Vector3(28, 0.1, 72))
+	if not is_equal_approx(tough.max_hp, 60.0 * 1.35):
+		errors.append("보통 난이도의 돌진형 체력 %.1f (기대 81)" % tough.max_hp)
+	var hp_before_hit := Combat.my_vitals().hp
+	Combat.damage_player(1, 10.0)
+	if not is_equal_approx(hp_before_hit - Combat.my_vitals().hp, 13.0):
+		errors.append("보통 난이도에서 받은 피해 %.1f (기대 13)" % (hp_before_hit - Combat.my_vitals().hp))
+	Combat._damage_enemy(tough, 9999.0, 0)
+	World.settings["difficulty"] = "easy"
 
 	# 검증: 연사 간격보다 빠른 보고, 모르는 무기는 거절된다.
 	var dummy := Combat.spawn_enemy(&"spitter", Vector3(25, 0.1, 70))
@@ -631,7 +669,7 @@ func _combat_test() -> void:
 		errors.append("다시 일어나지 못함 (쓰러짐=%s, 위치 %s)" % [player.downed, player.global_position])
 
 	if errors.is_empty():
-		print("COMBATTEST OK (처치 %d)" % Combat.kills)  # 소총 1 + 근접 1 + 정리 2 + 수류탄 3
+		print("COMBATTEST OK (처치 %d)" % Combat.kills)  # 소총 1 + 난이도 1 + 근접 1 + 정리 2 + 수류탄 3
 	else:
 		for e in errors:
 			print("COMBATTEST FAIL: %s" % e)
@@ -973,6 +1011,7 @@ func _build_shot(path: String) -> void:
 
 func _slice_test() -> void:
 	var errors: PackedStringArray = []
+	World.settings["difficulty"] = "easy"   # 기준 수치로 점검한다
 	var zone := map.zone_index
 	player.force_active = true
 	Save.autosave_enabled = false

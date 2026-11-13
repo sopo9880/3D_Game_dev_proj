@@ -8,6 +8,7 @@ const CHALLENGE_COUNT := 15
 var player: PlayerController
 var hud: Hud
 var panel: TuningPanel
+var pause: PauseMenu
 var sfx: Sfx
 var fx: Fx
 
@@ -43,6 +44,18 @@ func _ready() -> void:
 	panel = TuningPanel.new()
 	panel.player = player
 	layer.add_child(panel)
+	pause = PauseMenu.new()
+	pause.in_world = false
+	layer.add_child(pause)
+	pause.resumed.connect(func() -> void: player.input_enabled = true)
+	pause.leave_requested.connect(func() -> void:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		get_tree().change_scene_to_file("res://game/main.tscn"))
+	Settings.changed.connect(func() -> void:
+		player.sens_mult = float(Settings.get_value("sens"))
+		player.base_fov = float(Settings.get_value("fov")))
+	player.sens_mult = float(Settings.get_value("sens"))
+	player.base_fov = float(Settings.get_value("fov"))
 	player.hit_confirmed.connect(hud.on_hit)
 	player.weapon_switched.connect(func(_g: Gun) -> void:
 		if panel.visible:
@@ -64,11 +77,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		else:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	elif pause.visible:
+		if event.is_action_pressed(&"pause"):
+			pause.close()
 	elif event.is_action_pressed(&"pause"):
 		if panel.visible:
 			panel.visible = false
-			player.input_enabled = true
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		player.input_enabled = false
+		pause.open()
 	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED and not panel.visible:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		get_viewport().set_input_as_handled()
@@ -86,9 +102,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed(&"start_challenge"):
 		_start_challenge()
 	elif event.is_action_pressed(&"sens_up"):
-		player.sens_mult = minf(player.sens_mult + 0.05, 5.0)
+		Settings.set_value("sens", player.sens_mult + 0.05)
 	elif event.is_action_pressed(&"sens_down"):
-		player.sens_mult = maxf(player.sens_mult - 0.05, 0.1)
+		Settings.set_value("sens", player.sens_mult - 0.05)
 	elif event.is_action_pressed(&"toggle_fullscreen"):
 		var full := DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED if full else DisplayServer.WINDOW_MODE_FULLSCREEN)

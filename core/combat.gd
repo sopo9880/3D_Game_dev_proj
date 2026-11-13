@@ -231,7 +231,7 @@ func damage_player(peer: int, amount: float) -> void:
 	var v: Vitals = vitals.get(peer)
 	if v == null or v.state != PState.ALIVE or amount <= 0.0:
 		return
-	v.hp -= amount
+	v.hp -= amount * float(World.difficulty_mult()[1])
 	v.since_damage = 0.0
 	if v.hp <= 0.0:
 		v.hp = 0.0
@@ -529,7 +529,8 @@ func spawn_enemy(type_id: StringName, pos: Vector3) -> Enemy:
 			for peer: int in vitals:
 				if World.positions.has(peer) and World.positions[peer].distance_to(pos) <= activation_range:
 					players_near += 1
-			var e := _make_enemy(_next_enemy_id, d, CombatRules.scaled_hp(d.hp, players_near), false)
+			var hp := CombatRules.scaled_hp(d.hp, players_near) * float(World.difficulty_mult()[0])
+			var e := _make_enemy(_next_enemy_id, d, hp, false)
 			_next_enemy_id += 1
 			e.position = pos
 			return e
@@ -549,7 +550,26 @@ func spawn_cap() -> int:
 	var progress := World.sim.zone_progress(_zone) if _zone >= 0 else 0
 	if progress >= 100:
 		return 0
-	return 3 if progress < 50 else (2 if progress < 80 else 1)
+	var cap := 3 if progress < 50 else (2 if progress < 80 else 1)
+	# 다섯 명 이상이 함께 싸우면 체력만 올리지 않고 수도 늘린다.
+	return cap + (1 if _players_in_zone() >= 5 else 0)
+
+
+## 지금 구역에서 싸우고 있는 인원(출현 지점 근처에 있는 살아 있는 플레이어).
+func _players_in_zone() -> int:
+	var n := 0
+	for peer: int in vitals:
+		if vitals[peer].state != PState.ALIVE or not World.positions.has(peer):
+			continue
+		for sp in _spawn_points:
+			if World.positions[peer].distance_to(sp.pos) <= 90.0:
+				n += 1
+				break
+	return n
+
+
+func max_enemies() -> int:
+	return MAX_ENEMIES + 2 * maxi(_players_in_zone() - 4, 0)
 
 
 func _update_spawner(delta: float) -> void:
@@ -562,7 +582,7 @@ func _update_spawner(delta: float) -> void:
 	_update_boss(delta)
 	for sp in _spawn_points:
 		sp.cooldown = maxf(sp.cooldown - delta, 0.0)
-		if sp.cooldown > 0.0 or sp.alive.size() >= cap or enemies.size() >= MAX_ENEMIES:
+		if sp.cooldown > 0.0 or sp.alive.size() >= cap or enemies.size() >= max_enemies():
 			continue
 		var near: int = nearest_alive_player(sp.pos, activation_range)[0]
 		if near < 0:

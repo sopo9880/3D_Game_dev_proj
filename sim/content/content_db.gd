@@ -9,6 +9,8 @@ var recipes: Dictionary[StringName, RecipeDef] = {}
 var structures: Dictionary[StringName, StructureDef] = {}
 var crops: Array[CropDef] = []
 var zones: Array[ZoneDef] = []
+## 난이도 → [적 체력 배율, 적 피해 배율]. 전투(호스트)만 쓴다.
+var difficulty: Dictionary = {}
 var gather_ticks: Dictionary[int, int] = {}   ## 손으로 캘 수 있는 것: 아이템 인덱스 → 다시 캘 때까지의 틱
 var starting_kit: Dictionary[int, int] = {}   ## 아이템 인덱스 → 수량
 var max_build_height: int = 48
@@ -234,6 +236,7 @@ func _load_rules(path: String) -> void:
 			starting_kit[st.x] = st.y
 	max_build_height = int(rules.get("max_build_height", 48))
 	max_decor = int(rules.get("max_decor", 2000))
+	difficulty = rules.get("difficulty", {"normal": [1.0, 1.0]})
 	var gather: Dictionary = rules.get("gather_ticks", {})
 	for id: String in gather:
 		var idx := item_index(StringName(id))

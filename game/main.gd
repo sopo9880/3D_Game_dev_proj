@@ -15,10 +15,13 @@ var _address: LineEdit
 var _name: LineEdit
 var _worlds: OptionButton
 var _world_ids: Array[String] = []
+var _difficulty: OptionButton
+var _settings: SettingsPanel
 
 
 func _ready() -> void:
 	InputSetup.register()
+	Net.local_name = str(Settings.get_value("name"))
 	Net.connected.connect(_enter_world)
 	Net.disconnected.connect(_on_disconnected)
 	var port := Net.DEFAULT_PORT
@@ -28,6 +31,8 @@ func _ready() -> void:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--port="):
 			port = int(arg.trim_prefix("--port="))
+		elif arg.begins_with("--difficulty="):
+			Net.new_world_difficulty = arg.trim_prefix("--difficulty=")
 		elif arg.begins_with("--world="):
 			world_id = arg.trim_prefix("--world=")
 		elif arg.begins_with("--saveroot="):
@@ -86,6 +91,11 @@ func _build_menu() -> void:
 	if _world_ids.size() > 0:
 		_worlds.select(1)   # 가장 최근 월드를 기본으로
 	box.add_child(_worlds)
+	_difficulty = OptionButton.new()
+	for d in World.DIFFICULTIES:
+		_difficulty.add_item("새 월드 난이도: %s" % World.DIFFICULTY_NAMES[d])
+	_difficulty.select(1)
+	box.add_child(_difficulty)
 	_button(box, "혼자 시작", func() -> void:
 		_take_name()
 		Net.start_single(_selected_world()))
@@ -100,11 +110,15 @@ func _build_menu() -> void:
 		_take_name()
 		_join(_address.text.strip_edges(), Net.DEFAULT_PORT))
 	_button(box, "사격장", func() -> void: get_tree().change_scene_to_file(RANGE_SCENE))
+	_button(box, "설정", func() -> void: _settings.visible = true)
 	_button(box, "종료", func() -> void: get_tree().quit())
 	_status = Label.new()
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(_status)
+	_settings = SettingsPanel.new()
+	_settings.visible = false
+	add_child(_settings)
 
 
 func _button(parent: Control, text: String, action: Callable) -> void:
@@ -115,8 +129,11 @@ func _button(parent: Control, text: String, action: Callable) -> void:
 
 
 func _take_name() -> void:
+	Net.new_world_difficulty = World.DIFFICULTIES[_difficulty.selected]
 	if _name.text.strip_edges() != "":
 		Net.local_name = _name.text.strip_edges()
+		if Net.local_name != str(Settings.get_value("name")):
+			Settings.set_value("name", Net.local_name)
 
 
 func _selected_world() -> String:

@@ -49,6 +49,10 @@ func may_build(peer_id: int) -> bool:
 
 
 ## 혼자 플레이. 소켓을 열지 않으므로 네트워크 없이도 된다. 코드 경로는 호스트와 같다.
+## 새 월드를 만들 때 쓸 난이도(시작 화면에서 고른다). 이어 하는 월드는 저장된 값을 쓴다.
+var new_world_difficulty: String = "normal"
+
+
 func start_single(world_id: String = "") -> void:
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 	_begin_hosting(world_id)
@@ -88,10 +92,11 @@ func _begin_hosting(world_id: String) -> void:
 			_leave("load_failed")
 			disconnected.emit("세이브를 열 수 없습니다: %s" % why)
 			return
-		World.start_loaded(loaded["sim"], loaded["players"])
+		World.start_loaded(loaded["sim"], loaded["players"], loaded["settings"])
 	else:
 		Save.new_world("%s의 월드" % local_name)
 		World.start_new()
+		World.settings = {"difficulty": new_world_difficulty}
 	in_world = true
 	players_changed.emit()
 	connected.emit()

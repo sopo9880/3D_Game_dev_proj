@@ -45,7 +45,8 @@ func load_world(id: String) -> Dictionary:
 	world_id = id
 	world_name = str(manifest.get("name", id))
 	_timer = 0.0
-	return {"sim": sim, "players": data.get("players", {})}
+	var saved_settings: Variant = data.get("settings", {})
+	return {"sim": sim, "players": data.get("players", {}), "settings": saved_settings if saved_settings is Dictionary else {}}
 
 
 func is_saving() -> bool:
@@ -62,7 +63,7 @@ func save_now(blocking: bool = false) -> bool:
 		_thread.wait_to_finish()
 		_thread = null
 	# 여기서 상태를 복사한다. 이후의 변경은 이번 저장에 섞이지 않는다.
-	var data := {"sim": World.sim.to_dict(), "players": World.positions_for_save()}
+	var data := {"sim": World.sim.to_dict(), "players": World.positions_for_save(), "settings": World.settings.duplicate()}
 	var ticks := World.sim.tick_count
 	_timer = 0.0
 	if blocking:
