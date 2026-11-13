@@ -25,6 +25,7 @@
   2. 단위 테스트 (`tests/`)
   3. 슬라이스 규모 공장 벤치마크 — 평균 틱 4ms 초과 시 실패(공용 CI 장비가 느린 것을 감안해 예산 2ms의 두 배)
   4. 멀티플레이 통합 점검 (`tools/net_test.sh`: 호스트 1 + 클라이언트 3, 공장 상태·전투·부활)
+  5. 8인 부하 점검 (`tools/load_test.sh`: 호스트 1 + 자동 조작 클라이언트 7, 설비 504개, 한 명 강제 종료), 호스트 유실 점검 (`tools/drop_test.sh`)
   5. 전투 점검 (`-- --single --combattest`: 적 2종, 사격 검증, 수류탄, 쓰러짐과 부활)
   6. 건축 점검 (`-- --single --buildtest`: 건축 모드, 비용과 환급, 되돌리기, 제작, 밭, 탄약, 비동기 저장)
   7. 슬라이스 점검 (`-- --single --slicetest`: 손 채굴, 골짜기의 적, 수호체, 비콘, 복원, 저장)
@@ -71,6 +72,14 @@ godot --headless -- --single --slicetest
 
 ```bash
 tools/save_test.sh
+```
+
+```bash
+tools/load_test.sh
+```
+
+```bash
+tools/drop_test.sh
 ```
 
 멀티플레이를 직접 해 보려면 게임을 두 번 실행해 한쪽에서 "호스트", 다른 쪽에서 "참가"를 누른다(같은 PC면 주소 `127.0.0.1`, 포트 24565/UDP). 명령줄로는 `godot -- --host`, `godot -- --join=127.0.0.1`, 혼자는 `godot -- --single`.

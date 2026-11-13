@@ -20,8 +20,14 @@ var role_overrides: Dictionary[String, int] = {}
 var in_world: bool = false
 
 
+## 응답 없는 상대를 끊는 시간(ms). 기본값(최대 30초)보다 빨리 알아챈다.
+const TIMEOUT_MIN_MS := 4000
+const TIMEOUT_MAX_MS := 8000
+
+
 func _ready() -> void:
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
+	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.connected_to_server.connect(_on_connected_to_server)
 	multiplayer.connection_failed.connect(func() -> void: _leave("connection_failed"))
 	multiplayer.server_disconnected.connect(func() -> void: _leave("host_closed"))
@@ -118,6 +124,18 @@ func _leave(reason: String) -> void:
 
 
 # --- 접속 절차: 클라이언트가 버전과 콘텐츠 해시를 보내고, 호스트가 확인한 뒤 월드 스냅샷을 준다. ---
+
+func _on_peer_connected(peer_id: int) -> void:
+	var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if enet != null and enet.get_peer(peer_id) != null:
+		enet.get_peer(peer_id).set_timeout(0, TIMEOUT_MIN_MS, TIMEOUT_MAX_MS)
+
+
+## 호스트가 지금까지 보낸 바이트 수(ENet일 때만, 부하 점검용). 읽으면 0으로 돌아간다.
+func pop_sent_bytes() -> int:
+	var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	return int(enet.host.pop_statistic(ENetConnection.HOST_TOTAL_SENT_DATA)) if enet != null and enet.host != null else 0
+
 
 func _on_connected_to_server() -> void:
 	_hello.rpc_id(1, version(), Registry.db.content_hash(), local_name)

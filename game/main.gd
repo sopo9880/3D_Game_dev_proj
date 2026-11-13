@@ -1,3 +1,4 @@
+class_name MainMenu
 extends Control
 ## 시작 화면. 실행 인자가 있으면 메뉴를 건너뛴다.
 ##   -- --single                 혼자 샌드박스
@@ -17,6 +18,7 @@ var _worlds: OptionButton
 var _world_ids: Array[String] = []
 var _difficulty: OptionButton
 var _settings: SettingsPanel
+static var _last_disconnect: String = ""   ## 월드에서 튕겨 돌아왔을 때 보여 줄 이유
 
 
 func _ready() -> void:
@@ -116,6 +118,8 @@ func _build_menu() -> void:
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(_status)
+	_status.text = reason_text(_last_disconnect) if _last_disconnect != "" else ""
+	_last_disconnect = ""
 	_settings = SettingsPanel.new()
 	_settings.visible = false
 	add_child(_settings)
@@ -158,5 +162,24 @@ func _enter_world() -> void:
 
 
 func _on_disconnected(reason: String) -> void:
+	_last_disconnect = reason
 	if is_inside_tree() and _status != null:
-		_status.text = "연결이 끊겼습니다: %s" % reason
+		_status.text = reason_text(reason)
+
+
+static func remember_disconnect(reason: String) -> void:
+	_last_disconnect = reason
+
+
+## 접속이 끊기거나 거절된 이유를 사람이 읽을 말로.
+static func reason_text(reason: String) -> String:
+	if reason.begins_with("rejected:version_mismatch"):
+		return "호스트와 게임 버전이 다릅니다 (호스트: %s, 나: %s). 같은 빌드를 받아 주세요" % [reason.get_slice(":", 2), Net.version()]
+	match reason:
+		"rejected:content_mismatch": return "호스트와 게임 데이터가 다릅니다. 같은 빌드를 받아 주세요"
+		"rejected:full": return "월드가 가득 찼습니다 (최대 %d명)" % Net.MAX_PLAYERS
+		"connection_failed": return "호스트에 연결할 수 없습니다. 주소와 포트(%d/UDP)를 확인해 주세요" % Net.DEFAULT_PORT
+		"host_closed": return "호스트가 월드를 닫았거나 연결이 끊겼습니다"
+		"left": return ""
+		"load_failed": return "세이브를 열 수 없습니다"
+	return "연결이 끊겼습니다: %s" % reason

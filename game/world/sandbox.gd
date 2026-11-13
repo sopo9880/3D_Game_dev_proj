@@ -137,6 +137,8 @@ func _ready() -> void:
 			_save_test(arg.trim_prefix("--savetest="))
 		elif arg.begins_with("--buildshot="):
 			_build_shot(arg.trim_prefix("--buildshot="))
+		elif arg.begins_with("--loadtest="):
+			_load_test(arg.trim_prefix("--loadtest="))
 		elif arg == "--slicetest":
 			_slice_test()
 		elif arg.begins_with("--valleyshot="):
@@ -150,11 +152,17 @@ func _ready() -> void:
 
 
 func _on_disconnected(reason: String) -> void:
+	if OS.get_cmdline_user_args().has("--droptest"):
+		# 호스트가 사라졌을 때 클라이언트가 멈추지 않고 빠져나오는지 보는 점검.
+		print("DROPTEST client left the world: %s" % reason)
+		get_tree().quit(0)
+		return
 	if _nettest != "":
 		print("NETTEST %s disconnected: %s" % [_nettest, reason])
 		get_tree().quit(1)
 		return
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	MainMenu.remember_disconnect(reason)
 	get_tree().change_scene_to_file(MAIN_SCENE)
 
 
@@ -1194,3 +1202,79 @@ func _valley_shot(path: String) -> void:
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(path)
 	get_tree().quit()
+
+
+# ---------------------------------------------------------------------------
+# 8인 부하 점검 (tools/load_test.sh): 호스트 1 + 자동 조작 클라이언트 7.
+# 호스트는 설비 504개짜리 공장과 적을 띄우고, 클라이언트는 걷고 쏘고 짓는다.
+# ---------------------------------------------------------------------------
+
+const LOADTEST_END_TICK := 400
+
+func _load_test(role: String) -> void:
+	player.force_active = true
+	Combat.auto_spawn = false
+	Save.autosave_enabled = false
+	World.settings["difficulty"] = "easy"
+	var index := int(Net.local_name.trim_prefix("bot")) if role == "bot" else 0
+	var frames := 0
+	var worst_frame := 0.0
+	var frame_sum := 0.0
+	var last := Time.get_ticks_usec()
+	var started := Time.get_ticks_msec()
+	var acted := 0
+	if role == "host":
+		await _wait(0.5)
+		World.dev_stress()
+		World.sim.profile.fill(0)
+		Net.pop_sent_bytes()
+	while World.running and World.sim.tick_count < LOADTEST_END_TICK:
+		await get_tree().physics_frame
+		var now := Time.get_ticks_usec()
+		var dt := (now - last) / 1000.0
+		last = now
+		frames += 1
+		frame_sum += dt
+		worst_frame = maxf(worst_frame, dt)
+		var tick := World.sim.tick_count
+		if role == "host":
+			if tick >= 100 and acted == 0:
+				acted = 1
+				# 클라이언트들이 모여 있는 시작 지점 근처에 적을 푼다.
+				for i in 10:
+					Combat.spawn_enemy(&"crawler" if i % 2 == 0 else &"spitter", Vector3(-12.0 + i * 2.5, 0.2, 14.0))
+			continue
+		# 자동 조작: 원을 그리며 걷고, 쏘고, 가끔 짓고 부순다.
+		Input.action_press(&"move_forward")
+		player.yaw += 0.02 * (1.0 if index % 2 == 0 else -1.0)
+		if frames % 20 == index:
+			Combat.begin_shot(&"rifle", player.global_position + Vector3(0, 1.5, 0), player.global_position + Vector3(0, 1.5, -30))
+			if not Combat.enemies.is_empty():
+				Combat.queue_hit(Combat.enemies.keys()[index % Combat.enemies.size()], false)
+		var cell := Vector3i(-40 + index * 4, 0, 6)
+		if tick >= 60 + index * 3 and acted == 0:
+			acted = 1
+			World.request_place(&"storage", cell, 0)
+		elif tick >= 200 + index * 3 and acted == 1:
+			acted = 2
+			World.request_remove(World.sim.occupancy.get(cell, 0))
+			World.request_place_free(&"lamp", player.global_position, index * 30)
+	if not World.running:
+		print("LOADTEST %s%d lost connection" % [role, index])
+		get_tree().quit(1)
+		return
+	var seconds := (Time.get_ticks_msec() - started) / 1000.0
+	var line := "LOADTEST %s%d hash=%s players=%d resyncs=%d frame_avg_ms=%.1f frame_max_ms=%.1f" % [
+		role, index, World.sim.state_hash(), Net.players.size(), World.resync_count, frame_sum / maxi(frames, 1), worst_frame]
+	if role == "host":
+		var prof := 0
+		for v in World.sim.profile:
+			prof += v
+		var clients := maxi(Net.players.size() - 1, 1)
+		line += " tick_ms=%.2f kb_per_client_s=%.1f enemies_killed=%d left_pos_saved=%s" % [
+			prof / 1000.0 / maxi(World.sim.tick_count, 1), Net.pop_sent_bytes() / 1024.0 / seconds / clients,
+			Combat.kills, World.saved_positions.has("bot7")]
+	print(line)
+	if role == "host":
+		await _wait(2.0)
+	get_tree().quit(0)
