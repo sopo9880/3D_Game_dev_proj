@@ -9,6 +9,7 @@ var recipes: Dictionary[StringName, RecipeDef] = {}
 var structures: Dictionary[StringName, StructureDef] = {}
 var crops: Array[CropDef] = []
 var zones: Array[ZoneDef] = []
+var techs: Array[TechDef] = []
 ## 난이도 → [적 체력 배율, 적 피해 배율]. 전투(호스트)만 쓴다.
 var difficulty: Dictionary = {}
 var gather_ticks: Dictionary[int, int] = {}   ## 손으로 캘 수 있는 것: 아이템 인덱스 → 다시 캘 때까지의 틱
@@ -26,6 +27,7 @@ static func load_from_dir(dir: String) -> ContentDB:
 	db._load_crops(db._read(dir.path_join("crops.json")))
 	db._load_rules(dir.path_join("rules.json"))
 	db._load_zones(db._read(dir.path_join("zones.json")))
+	db._load_techs(db._read(dir.path_join("techs.json")))
 	return db
 
 
@@ -57,6 +59,8 @@ func content_hash() -> String:
 		parts.append("%s:%d:%d:%d:%d:%d:%d:%d" % [c.id, c.seed_item, c.product_item, c.grow_ticks, c.stages, c.yield_count, c.seed_return, c.bonus_seed_percent])
 	for z in zones:
 		parts.append("%s:%d:%d:%s:%s" % [z.id, z.capsule_item, z.capsule_points, z.beacon_site, z.unlock_zone])
+	for t in techs:
+		parts.append("%s:%s:%s:%d:%s" % [t.id, t.cost_items, t.cost_counts, t.requires, t.unlocks])
 	parts.append("kit:%s:%d:%d:%s" % [starting_kit, max_build_height, max_decor, gather_ticks])
 	return "\n".join(parts).sha256_text()
 
@@ -246,6 +250,47 @@ func _load_rules(path: String) -> void:
 			errors.append("gather_ticks: 없는 아이템 '%s'" % id)
 		else:
 			gather_ticks[idx] = int(gather[id])
+
+
+func tech_by_id(id: StringName) -> TechDef:
+	for t in techs:
+		if t.id == id:
+			return t
+	return null
+
+
+func _load_techs(rows: Array) -> void:
+	var pending_requires: Dictionary[int, StringName] = {}
+	for row: Dictionary in rows:
+		var t := TechDef.new()
+		t.id = StringName(str(row.get("id", "")))
+		if t.id == &"" or tech_by_id(t.id) != null:
+			errors.append("연구 ID 누락 또는 중복: '%s'" % t.id)
+			continue
+		t.index = techs.size()
+		t.display_name = str(row.get("name", t.id))
+		for pair: Variant in row.get("cost", []):
+			var st := _stack("연구 %s" % t.id, pair)
+			t.cost_items.append(st.x)
+			t.cost_counts.append(st.y)
+		if row.has("requires"):
+			pending_requires[t.index] = StringName(str(row["requires"]))
+		for u: Variant in row.get("unlocks", []):
+			var target := StringName(str(u))
+			t.unlocks.append(target)
+			if structures.has(target):
+				structures[target].unlock_tech = t.index
+			elif recipes.has(target):
+				recipes[target].unlock_tech = t.index
+			else:
+				errors.append("연구 %s: 없는 구조물/레시피 '%s'" % [t.id, target])
+		techs.append(t)
+	for index: int in pending_requires:
+		var req := tech_by_id(pending_requires[index])
+		if req == null:
+			errors.append("연구 %s: 없는 선행 연구 '%s'" % [techs[index].id, pending_requires[index]])
+		else:
+			techs[index].requires = req.index
 
 
 func zone_by_id(id: StringName) -> ZoneDef:

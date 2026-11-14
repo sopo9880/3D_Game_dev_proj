@@ -28,6 +28,7 @@ var power_use: int = 0
 var power_gen: int = 0
 var power_radius: int = 0
 var params: Dictionary = {}
+var unlock_tech: int = -1   ## 이 연구가 끝나야 지을 수 있다. -1이면 처음부터 가능
 ## 이 설비에서 가능한 레시피(ContentDB가 채운다).
 var recipes: Array[RecipeDef] = []
 ## 발전기: 연료 아이템 인덱스 → 연소 틱.

@@ -27,6 +27,7 @@ const REASONS: Dictionary[String, String] = {
 	"bad_request": "잘못된 요청", "unknown_structure": "모르는 구조물", "full": "가득 참",
 	"not_buildable": "건축할 수 없는 땅", "needs_site": "골짜기의 비콘 자리에만 설치", "not_ready": "아직 캘 수 없음",
 	"too_steep": "높이 차이에 비해 벨트가 너무 짧음(한 칸에 1m씩 오른다)",
+	"locked": "연구가 필요함 (작업대에서 연구)", "already_done": "이미 끝낸 연구", "needs_prerequisite": "선행 연구가 필요함",
 }
 
 var player: PlayerController
@@ -160,7 +161,7 @@ func _process(_delta: float) -> void:
 		tab_line.append(("[%s]" if t == tab else "%s") % TAB_NAMES[TAB_ORDER[t]])
 	hud.build_text = "%s   (Tab)\n%s  %d/%d   비용: %s\n%s%s" % [
 		"  ".join(tab_line), _display_name(def), index + 1, (_tabs[tab] as Array).size(), ", ".join(parts),
-		reason_text(reason) if reason != "" else "설치 가능", "  ·  " + hint if hint != "" else ""]
+		_reason_line(def), "  ·  " + hint if hint != "" else ""]
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +230,8 @@ func update_target(hit_pos: Vector3, hit_normal: Vector3, has_hit: bool) -> void
 			var cell := c - SimWorld.rotate_cell(half, rot)
 			_target = {"cell": cell, "rot": rot}
 			reason = sim.can_place(def.id, cell, rot)
+	if reason == "" and not sim.structure_unlocked(def):
+		reason = "locked"
 	if reason == "" and not Net.may_build(Net.my_id()):
 		reason = "no_permission"
 	if reason == "" and not sim.can_afford(key, sim.build_cost(def, (_target.get("path", []) as Array).size())):
@@ -348,6 +351,14 @@ func undo() -> bool:
 
 func undo_count() -> int:
 	return _undo.size()
+
+
+func _reason_line(def: StructureDef) -> String:
+	if reason == "":
+		return "설치 가능"
+	if reason == "locked" and def.unlock_tech >= 0:
+		return "연구 필요: %s (작업대)" % Registry.db.techs[def.unlock_tech].display_name
+	return reason_text(reason)
 
 
 func _on_structure_added(s: SimStructure) -> void:

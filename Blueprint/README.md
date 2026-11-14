@@ -1,4 +1,4 @@
-# Edenfall Blueprint v0.11
+# Edenfall Blueprint v0.12
 
 이 폴더는 Edenfall의 **단일 기준 문서(single source of truth)** 다. 초기 기획(v0.1)을 검토해 모순을 없애고, 결정되지 않았던 부분을 결정하고, 1인 개발로 실제 만들 수 있는 크기로 다시 잘랐다.
 
@@ -17,6 +17,10 @@
 | [07_decisions.md](07_decisions.md) | 결정 기록, 아직 열려 있는 질문 | 왜 이렇게 했는지 궁금할 때 |
 | [09_building_design_plan.md](09_building_design_plan.md) | 건축 모드의 조작과 화면, 건축 구역, 항목별 상태(확정/채택/후보), 아트 방향 | 건축 UX나 건축 에셋을 다룰 때 |
 | [08_dev_process.md](08_dev_process.md) | 버전 규칙, 테스트 실행, 테스트 빌드 받는 법, 의견 주는 법 | 빌드를 받거나 버전을 올릴 때 |
+
+## v0.12에서 바뀐 것
+
+연구를 넣었다: 작업대에서 재료를 내면 설비와 레시피가 월드 전체에 열린다([02의 연구 장](02_systems.md), D-068, D-069). 세이브 형식 5.
 
 ## v0.11에서 바뀐 것
 

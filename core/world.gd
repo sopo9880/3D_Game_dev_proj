@@ -17,6 +17,7 @@ signal items_gained(key: String, items: Dictionary)   ## 수확·전리품으로
 signal consumed(key: String, item_id: StringName, count: int)
 signal zone_progress_changed(zone: int, progress: int)
 signal boss_defeated(zone: int)
+signal tech_researched(tech_id: StringName, by: String)
 signal spawn_assigned(pos: Vector3, yaw: float)  ## 저장된 내 위치를 호스트가 알려 줬다
 signal remote_player_state(peer_id: int, pos: Vector3, yaw: float, pitch: float, crouch: bool)
 
@@ -324,6 +325,8 @@ func _do(sender: int, op: String, a: Array) -> void:
 				why = "no_permission"
 			else:
 				why = sim.can_place(StringName(a[0]), a[1], a[2])
+				if why == "" and not sim.structure_unlocked(Registry.db.structures[StringName(a[0])]):
+					why = "locked"
 				if why == "" and not sim.can_afford(by, sim.build_cost(Registry.db.structures[StringName(a[0])])):
 					why = "cannot_afford"
 				ev = [a[0], a[1], a[2], by, sim.next_id]
@@ -341,6 +344,8 @@ func _do(sender: int, op: String, a: Array) -> void:
 						why = "bad_request"
 				if why == "" and (def == null or def.kind != StructureDef.Kind.BELT):
 					why = "unknown_structure"
+				if why == "" and not sim.structure_unlocked(def):
+					why = "locked"
 				if why == "":
 					why = sim.can_place_belt(path, a[2])
 				if why == "" and not sim.can_afford(by, sim.build_cost(def, path.size())):
@@ -390,7 +395,17 @@ func _do(sender: int, op: String, a: Array) -> void:
 				why = "bad_request"
 			elif not _near_workbench(sender):
 				why = "need_workbench"
+			elif Registry.db.recipes.has(StringName(a[0])) and not sim.recipe_unlocked(Registry.db.recipes[StringName(a[0])]):
+				why = "locked"
 			ev = [a[0], a[1], by]
+		"research":
+			if not _types(a, [TYPE_STRING]):
+				why = "bad_request"
+			elif not _near_workbench(sender):
+				why = "need_workbench"
+			else:
+				why = sim.can_research(by, StringName(a[0]))
+			ev = [a[0], by]
 		"plant":
 			if not _types(a, [TYPE_INT, TYPE_STRING]):
 				why = "bad_request"
@@ -534,6 +549,9 @@ func _apply(op: String, a: Array) -> void:
 		"consume":
 			var n := sim.inv_remove(a[2], db.item_index(StringName(a[0])), a[1])
 			consumed.emit(a[2], StringName(a[0]), n)
+		"research":
+			if sim.research(a[1], StringName(a[0])):
+				tech_researched.emit(StringName(a[0]), a[1])
 		"gather":
 			var item := sim.gather(a[1], a[0])
 			if item >= 0:

@@ -157,3 +157,19 @@ func test_format_3_fixture_migrates_with_zones_intact() -> void:
 	check(w.occupancy.has(Vector3i(102, 3, 2)), "단 위의 저장소")
 	eq(w.zone_progress(0), 0, "복원은 처음부터")
 	check(not w.boss_defeated(0), "우두머리는 살아 있다")
+
+
+## 형식 4(v0.5.1, 연구가 없던 때)의 세이브: 지어 둔 설비는 그대로 돌고, 연구는 처음부터다.
+func test_format_4_fixture_keeps_built_machines_and_starts_research_fresh() -> void:
+	var old: Variant = bytes_to_var(FileAccess.get_file_as_bytes("res://tests/fixtures/sim_format_4.bin"))
+	check(old is Dictionary and int((old as Dictionary).get("format", 0)) == 4, "형식 4 샘플")
+	var w := SimWorld.from_dict(db, SaveMigrations.migrate_sim(old))
+	check(w != null, "불러오기")
+	eq(w.structures.size(), 22, "구조물 22개")
+	eq(w.batteries.size(), 1, "축전지")
+	eq(w.harvesters.size(), 1, "수확기")
+	eq(w.zone_progress(0), 40, "복원 진행도")
+	check(w.boss_defeated(0), "우두머리 처치 기록")
+	check(not w.structure_unlocked(db.structures[&"wind_turbine"]), "연구는 처음부터")
+	FactoryFixture.run(w, 20)
+	check(w.batteries[0].grid != null, "지어 둔 풍력과 축전지는 계속 돈다")

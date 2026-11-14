@@ -15,6 +15,7 @@ static func migrate_sim(d: Dictionary) -> Dictionary:
 			1: out = _sim_1_to_2(out)
 			2: out = _sim_2_to_3(out)
 			3: out = _sim_3_to_4(out)
+			4: out = _sim_4_to_5(out)
 			_: return {}
 		format = int(out.get("format", -1))
 	return out
@@ -42,4 +43,12 @@ static func _sim_3_to_4(d: Dictionary) -> Dictionary:
 	d["restore"] = []
 	d["gather"] = []
 	d["format"] = 4
+	return d
+
+
+## 4 → 5 (v0.5.2): 연구가 생겼다. 옛 세이브는 아무것도 연구하지 않은 상태로 시작한다.
+## 이미 지어 둔 설비는 그대로 돌아가고, 같은 설비를 더 지으려면 연구가 필요하다.
+static func _sim_4_to_5(d: Dictionary) -> Dictionary:
+	d["techs"] = []
+	d["format"] = 5
 	return d

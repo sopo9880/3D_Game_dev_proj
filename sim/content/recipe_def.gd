@@ -10,3 +10,4 @@ var out_count: int = 1
 var ticks: int = 10
 var machines: Array[StringName] = []
 var unlocked_by_default: bool = true
+var unlock_tech: int = -1   ## 이 연구가 끝나야 만들 수 있다. -1이면 처음부터 가능

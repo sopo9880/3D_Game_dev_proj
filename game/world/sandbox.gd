@@ -112,6 +112,10 @@ func _ready() -> void:
 		nav_map = map.bake()
 	Combat.bind_scene(self, Vector3.ZERO, nav_map, map.config(), player.get_rid())
 	World.zone_progress_changed.connect(_on_zone_progress)
+	World.tech_researched.connect(func(tech_id: StringName, by: String) -> void:
+		var tech := Registry.db.tech_by_id(tech_id)
+		hud.toast("연구 완료: %s (%s)" % [tech.display_name if tech != null else String(tech_id), by])
+		player.refresh_mods())
 	World.boss_defeated.connect(func(_zone: int) -> void:
 		hud.toast("수호체를 쓰러뜨렸습니다. 에너지 코어를 얻었습니다")
 		sfx.play(&"kill", 0.02))
@@ -905,6 +909,37 @@ func _build_test() -> void:
 	if StructureView.port_markers(Registry.db.structures[&"smelter"], Vector3i.ZERO, 0).size() != 2 \
 			or StructureView.port_markers(Registry.db.structures[&"floor"], Vector3i.ZERO, 0).size() != 0:
 		errors.append("포트 표시 개수가 다름")
+
+	# 연구: 잠긴 설비는 지을 수 없고, 작업대에서 재료를 내면 열린다.
+	player.teleport(Vector3(6, 0.05, -8), 0.0)
+	await _wait(0.3)
+	build.set_active(true)
+	build.select(&"solar_panel")
+	build.update_target(Vector3(-10.5, 0, -10.5), Vector3.UP, true)
+	if build.reason != "locked":
+		errors.append("연구 전 태양광이 '%s' (기대 locked)" % build.reason)
+	_last_reject = ""
+	World.request_place(&"solar_panel", Vector3i(-11, 0, -11), 0)   # 미리보기를 건너뛴 요청도 호스트가 막는다
+	if _last_reject != "locked":
+		errors.append("잠긴 설비의 설치 요청이 '%s'" % _last_reject)
+	build.set_active(false)
+	open_panel(bench)
+	panel.act("research", ["solar_power"])
+	if World.sim.tech_done(Registry.db.tech_by_id(&"solar_power").index):
+		errors.append("재료 없이 연구가 됨")
+	panel.act("research", ["wind_power"])
+	World.grant(1, {"precision_part": 5, "scrap": 4, "iron_ingot": 20})   # 연구에 4, 패널 설치에 1
+	panel.act("research", ["solar_power"])
+	_close_panel()
+	if not World.sim.tech_done(Registry.db.tech_by_id(&"solar_power").index) or World.my_count(&"scrap") != 0:
+		errors.append("태양광 연구 실패 (고철 %d)" % World.my_count(&"scrap"))
+	if World.sim.tech_done(Registry.db.tech_by_id(&"wind_power").index):
+		errors.append("선행 연구 없이 풍력이 연구됨")
+	build.set_active(true)
+	_place_at(&"solar_panel", Vector3(-10.5, 0, -10.5))
+	build.set_active(false)
+	if World.sim.occupancy.get(Vector3i(-11, 0, -11), 0) == 0:
+		errors.append("연구 뒤에도 태양광 설치 실패: %s" % build.reason)
 
 	# 새 설비가 건축 목록에 있고, 벨트의 끝점이 높으면 경사 벨트가 된다.
 	for id: StringName in [&"belt_fast", &"solar_panel", &"wind_turbine", &"battery", &"sprinkler", &"harvester"]:

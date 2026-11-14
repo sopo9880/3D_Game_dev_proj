@@ -7,7 +7,7 @@ extends RefCounted
 ## - 정수 연산만 쓰고, 순회 순서는 항상 구조물 ID 오름차순이나 미리 계산한 순서다.
 ## - 같은 상태에서 같은 횟수만큼 tick()을 부르면 항상 같은 결과가 나온다.
 
-const SAVE_FORMAT := 4
+const SAVE_FORMAT := 5
 const DIRV: Array[Vector3i] = [Vector3i(0, 0, -1), Vector3i(1, 0, 0), Vector3i(0, 0, 1), Vector3i(-1, 0, 0)]
 const GRID_BUCKET := 32
 
@@ -33,6 +33,8 @@ var restore: Dictionary[int, int] = {}
 var boss_down: Dictionary[int, bool] = {}
 ## 손으로 캔 자리: 칸 → 다시 캘 수 있는 틱.
 var gather_ready: Dictionary[Vector3i, int] = {}
+## 끝낸 연구(연구 인덱스 → true). 월드 전체가 함께 쓴다(D-014).
+var techs_done: Dictionary[int, bool] = {}
 ## 플레이어 소지품: 플레이어 키 → (아이템 인덱스 → 수량). 월드 세이브에 함께 저장된다(D-013).
 var inventories: Dictionary[String, Dictionary] = {}
 
@@ -573,10 +575,53 @@ func take_to(key: String, id: int, item_id: StringName, count: int) -> int:
 	return n
 
 
+# ---------------------------------------------------------------------------
+# 연구
+# ---------------------------------------------------------------------------
+
+func tech_done(tech: int) -> bool:
+	return tech < 0 or techs_done.get(tech, false)
+
+
+## 그 구조물을 지을 수 있는가(연구가 필요 없거나 끝났다).
+func structure_unlocked(def: StructureDef) -> bool:
+	return tech_done(def.unlock_tech)
+
+
+func recipe_unlocked(r: RecipeDef) -> bool:
+	return tech_done(r.unlock_tech)
+
+
+## 지금 연구할 수 있는가. 문제가 없으면 빈 문자열.
+func can_research(key: String, tech_id: StringName) -> String:
+	var t := db.tech_by_id(tech_id)
+	if t == null:
+		return "not_found"
+	if tech_done(t.index):
+		return "already_done"
+	if not tech_done(t.requires):
+		return "needs_prerequisite"
+	for i in t.cost_items.size():
+		if inv_count(key, t.cost_items[i]) < t.cost_counts[i]:
+			return "cannot_afford"
+	return ""
+
+
+## 재료를 내고 연구를 끝낸다. 성공하면 true.
+func research(key: String, tech_id: StringName) -> bool:
+	if can_research(key, tech_id) != "":
+		return false
+	var t := db.tech_by_id(tech_id)
+	for i in t.cost_items.size():
+		inv_remove(key, t.cost_items[i], t.cost_counts[i])
+	techs_done[t.index] = true
+	return true
+
+
 ## 작업대 손 제작. 재료가 되는 만큼 최대 times번 만든다. 만든 횟수를 돌려준다.
 func craft(key: String, recipe_id: StringName, times: int) -> int:
 	var r: RecipeDef = db.recipes.get(recipe_id)
-	if r == null or not r.machines.has(&"workbench") or not inventories.has(key):
+	if r == null or not r.machines.has(&"workbench") or not inventories.has(key) or not recipe_unlocked(r):
 		return 0
 	var done := 0
 	while done < times:
@@ -1245,8 +1290,16 @@ func to_dict() -> Dictionary:
 		"format": SAVE_FORMAT, "tick": tick_count, "next_id": next_id,
 		"palette": palette, "nodes": node_rows, "structures": rows, "inventories": inv_rows,
 		"zones": build_zones.duplicate(),
-		"restore": _restore_rows(), "gather": _gather_rows(),
+		"restore": _restore_rows(), "gather": _gather_rows(), "techs": _tech_rows(),
 	}
+
+
+func _tech_rows() -> Array:
+	var out: Array = []
+	for t in db.techs:
+		if techs_done.get(t.index, false):
+			out.append(String(t.id))
+	return out
 
 
 func _restore_rows() -> Array:
@@ -1358,6 +1411,10 @@ static func from_dict(content: ContentDB, d: Dictionary) -> SimWorld:
 				w.restore[zone_def.index] = int(r[1])
 			if bool(r[2]):
 				w.boss_down[zone_def.index] = true
+	for tech_id: String in d.get("techs", []):
+		var tech := content.tech_by_id(StringName(tech_id))
+		if tech != null:
+			w.techs_done[tech.index] = true
 	for g: Array in d.get("gather", []):
 		w.gather_ready[Vector3i(int(g[0]), int(g[1]), int(g[2]))] = int(g[3])
 	for inv_row: Array in d.get("inventories", []):

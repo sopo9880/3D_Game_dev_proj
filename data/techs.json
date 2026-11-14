@@ -1,0 +1,25 @@
+[
+  {"id": "logistics_2", "name": "고속 물류",
+   "cost": [["iron_ingot", 20], ["precision_part", 3]],
+   "unlocks": ["belt_fast"]},
+
+  {"id": "farm_automation", "name": "농장 자동화",
+   "cost": [["glowleaf", 12], ["precision_part", 2]],
+   "unlocks": ["sprinkler", "harvester"]},
+
+  {"id": "solar_power", "name": "태양광 발전",
+   "cost": [["precision_part", 4], ["scrap", 4]],
+   "unlocks": ["solar_panel"]},
+
+  {"id": "wind_power", "name": "풍력 발전", "requires": "solar_power",
+   "cost": [["precision_part", 6], ["relic_blueprint", 1]],
+   "unlocks": ["wind_turbine"]},
+
+  {"id": "power_storage", "name": "전력 저장", "requires": "solar_power",
+   "cost": [["precision_part", 4], ["taint_crystal", 6]],
+   "unlocks": ["battery"]},
+
+  {"id": "weapon_mods", "name": "무기 개조",
+   "cost": [["scrap", 6], ["relic_blueprint", 1]],
+   "unlocks": ["make_ext_mag"]}
+]

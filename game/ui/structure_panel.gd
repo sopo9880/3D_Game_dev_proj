@@ -156,6 +156,8 @@ func _refresh() -> void:
 		StructureDef.Kind.WORKBENCH:
 			lines.append("손으로 만든다. 재료는 소지품에서 쓴다.")
 			for r in s.def.recipes:
+				if not World.sim.recipe_unlocked(r):
+					continue   # 연구로 열리는 레시피는 연구 뒤에 보인다
 				var needs: PackedStringArray = []
 				var can := true
 				for i in r.in_items.size():
@@ -165,6 +167,20 @@ func _refresh() -> void:
 				var label := "%s ×%d   ← %s" % [db.item_def(r.out_item).display_name, r.out_count, ", ".join(needs)]
 				buttons.append([label, "craft", [String(r.id), 1], can])
 				buttons.append(["      같은 것 5번", "craft", [String(r.id), 5], can])
+			# 연구: 재료를 내면 월드의 모두에게 열린다.
+			for t in db.techs:
+				if World.sim.tech_done(t.index):
+					buttons.append(["연구 완료: %s  ✓" % t.display_name, "research", [String(t.id)], false])
+					continue
+				var costs: PackedStringArray = []
+				for i in t.cost_items.size():
+					costs.append("%s %d/%d" % [db.item_def(t.cost_items[i]).display_name,
+						World.sim.inv_count(key, t.cost_items[i]), t.cost_counts[i]])
+				var note := ""
+				if not World.sim.tech_done(t.requires):
+					note = "  (먼저: %s)" % db.techs[t.requires].display_name
+				buttons.append(["연구: %s   ← %s%s" % [t.display_name, ", ".join(costs), note], "research", [String(t.id)],
+					World.sim.can_research(key, t.id) == ""])
 	_info.text = "\n".join(lines)
 
 	# 버튼 구성이 바뀌었을 때만 다시 만든다(누르는 도중에 버튼이 사라지지 않게).
