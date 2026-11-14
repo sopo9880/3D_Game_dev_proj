@@ -58,5 +58,15 @@ var watered: bool = false        ## 물을 주면 다음 성장 단계까지 두
 var free_pos: Vector3i = Vector3i.ZERO
 var free_yaw: int = 0
 
+# --- 축전지: 저장한 전력(전력 × 틱) ---
+var charge: int = 0
+
+# --- 연료 없는 발전기: 출력 백분율(복원된 구역 안이면 150) ---
+var bonus_pct: int = 100
+
+# --- 관수기·자동 수확기: 닿는 밭들(토폴로지 캐시), 수확기가 모은 작물 ---
+var targets: Array[SimStructure] = []
+var out_item: int = -1
+
 # --- 복원 비콘 ---
 var zone: int = -1               ## 이 비콘이 복원하는 구역의 인덱스

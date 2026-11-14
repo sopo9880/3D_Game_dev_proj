@@ -172,8 +172,10 @@ func _load_structures(rows: Array) -> void:
 					errors.append("%s: 없는 연료 '%s'" % [what, fid])
 				else:
 					s.fuels[idx] = int(fuel[fid])
-			if s.fuels.is_empty() or s.power_gen <= 0 or s.power_radius <= 0:
-				errors.append("%s: 발전기는 fuel, power_gen, power_radius 필요" % what)
+			# 연료 없이 도는 발전기(태양광, 풍력)는 params.passive 로 표시한다.
+			var passive: bool = s.params.get("passive", false)
+			if (s.fuels.is_empty() and not passive) or s.power_gen <= 0 or s.power_radius <= 0:
+				errors.append("%s: 발전기는 fuel(또는 passive), power_gen, power_radius 필요" % what)
 		structures[s.id] = s
 
 	# 레시피 → 설비 연결. workbench처럼 시뮬레이션 밖 설비도 구조물로는 존재해야 한다.

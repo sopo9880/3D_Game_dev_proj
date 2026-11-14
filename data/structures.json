@@ -19,6 +19,9 @@
   {"id": "belt", "tab": "industry", "kind": "belt", "footprint": [1, 1, 1], "cost": [["iron_ingot", 1]],
    "params": {"period": 5, "cells_per_cost": 4}},
 
+  {"id": "belt_fast", "tab": "industry", "kind": "belt", "footprint": [1, 1, 1], "cost": [["iron_ingot", 2]],
+   "params": {"period": 3, "cells_per_cost": 4}},
+
   {"id": "junction", "tab": "industry", "kind": "junction", "footprint": [1, 1, 1], "cost": [["iron_ingot", 4]],
    "ports": [{"cell": [0, 0, 0], "dir": "n", "io": "any"}, {"cell": [0, 0, 0], "dir": "e", "io": "any"},
              {"cell": [0, 0, 0], "dir": "s", "io": "any"}, {"cell": [0, 0, 0], "dir": "w", "io": "any"}]},
@@ -31,11 +34,31 @@
    "power_gen": 50, "power_radius": 20, "params": {"fuel": {"biofuel": 300}, "fuel_cap": 10},
    "ports": [{"cell": [1, 0, 2], "dir": "s", "io": "in"}]},
 
+  {"id": "solar_panel", "tab": "industry", "kind": "generator", "footprint": [2, 1, 2],
+   "cost": [["iron_ingot", 8], ["precision_part", 1]],
+   "power_gen": 8, "power_radius": 15, "params": {"passive": true}},
+
+  {"id": "wind_turbine", "tab": "industry", "kind": "generator", "footprint": [2, 8, 2],
+   "cost": [["iron_ingot", 12], ["precision_part", 2]],
+   "power_gen": 15, "power_radius": 20, "params": {"passive": true}},
+
+  {"id": "battery", "tab": "industry", "kind": "battery", "footprint": [2, 2, 2],
+   "cost": [["iron_ingot", 10], ["precision_part", 2]],
+   "params": {"capacity": 6000, "rate": 30}},
+
   {"id": "power_pole", "tab": "industry", "kind": "power_pole", "footprint": [1, 4, 1], "cost": [["iron_ingot", 2]],
    "power_radius": 20},
 
   {"id": "workbench", "tab": "industry", "kind": "workbench", "footprint": [2, 1, 2], "cost": [["iron_ingot", 4]]},
   {"id": "plot",      "tab": "nature",   "kind": "plot", "footprint": [2, 1, 2], "cost": [["iron_ingot", 1]]},
+  {"id": "sprinkler", "tab": "nature", "kind": "sprinkler", "footprint": [1, 2, 1], "cost": [["iron_ingot", 4]],
+   "power_use": 2, "params": {"range": 4}},
+
+  {"id": "harvester", "tab": "nature", "kind": "harvester", "footprint": [2, 2, 2],
+   "cost": [["iron_ingot", 8], ["precision_part", 1]],
+   "power_use": 5, "params": {"range": 4, "buffer": 24},
+   "ports": [{"cell": [0, 0, 0], "dir": "n", "io": "out"}]},
+
   {"id": "chair",   "tab": "interior", "kind": "decor", "footprint": [1, 1, 1], "cost": [["iron_ingot", 1]], "params": {"size": [0.5, 0.9, 0.5]}},
   {"id": "table",   "tab": "interior", "kind": "decor", "footprint": [1, 1, 1], "cost": [["iron_ingot", 1]], "params": {"size": [1.4, 0.8, 0.8]}},
   {"id": "lamp",    "tab": "interior", "kind": "decor", "footprint": [1, 1, 1], "cost": [["iron_ingot", 1]], "params": {"size": [0.25, 1.8, 0.25], "light": true}},

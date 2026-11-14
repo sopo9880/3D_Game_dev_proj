@@ -2,7 +2,7 @@ class_name StructureDef
 extends RefCounted
 ## 구조물 정의. data/structures.json 한 항목.
 
-enum Kind { NONE, CRAFTER, BELT, JUNCTION, STORAGE, GENERATOR, POWER_POLE, FLOOR, WALL, STAIRS, PLOT, WORKBENCH, DECOR, BEACON }
+enum Kind { NONE, CRAFTER, BELT, JUNCTION, STORAGE, GENERATOR, POWER_POLE, FLOOR, WALL, STAIRS, PLOT, WORKBENCH, DECOR, BEACON, BATTERY, SPRINKLER, HARVESTER }
 enum PortIO { IN, OUT, ANY }
 
 const KIND_NAMES: Dictionary[String, int] = {
@@ -10,6 +10,7 @@ const KIND_NAMES: Dictionary[String, int] = {
 	"storage": Kind.STORAGE, "generator": Kind.GENERATOR, "power_pole": Kind.POWER_POLE,
 	"floor": Kind.FLOOR, "wall": Kind.WALL, "stairs": Kind.STAIRS, "plot": Kind.PLOT,
 	"workbench": Kind.WORKBENCH, "decor": Kind.DECOR, "beacon": Kind.BEACON,
+	"battery": Kind.BATTERY, "sprinkler": Kind.SPRINKLER, "harvester": Kind.HARVESTER,
 }
 const DIR_NAMES: Dictionary[String, int] = {"n": 0, "e": 1, "s": 2, "w": 3}
 const IO_NAMES: Dictionary[String, int] = {"in": PortIO.IN, "out": PortIO.OUT, "any": PortIO.ANY}

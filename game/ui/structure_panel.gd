@@ -38,7 +38,8 @@ func _ready() -> void:
 func open(id: int) -> bool:
 	var s: SimStructure = World.sim.structures.get(id)
 	if s == null or not s.kind in [StructureDef.Kind.CRAFTER, StructureDef.Kind.STORAGE, StructureDef.Kind.GENERATOR,
-			StructureDef.Kind.PLOT, StructureDef.Kind.WORKBENCH, StructureDef.Kind.BEACON]:
+			StructureDef.Kind.PLOT, StructureDef.Kind.WORKBENCH, StructureDef.Kind.BEACON,
+			StructureDef.Kind.BATTERY, StructureDef.Kind.HARVESTER, StructureDef.Kind.SPRINKLER]:
 		return false
 	structure_id = id
 	_signature = ""
@@ -101,8 +102,29 @@ func _refresh() -> void:
 			for item: int in inv:
 				var item_def := db.item_def(item)
 				buttons.append(["넣기: %s %d" % [item_def.display_name, int(inv[item])], "insert", [s.id, String(item_def.id), 99999], true])
+		StructureDef.Kind.BATTERY:
+			var capacity := int(s.def.params.get("capacity", 1))
+			lines.append("충전 %d / %d  (%d%%)" % [s.charge, capacity, s.charge * 100 / maxi(capacity, 1)])
+			lines.append("전력이 남으면 저장하고 모자라면 내놓는다. 틱당 최대 %d." % int(s.def.params.get("rate", 0)))
+			lines.append("전력망: 연결 안 됨" if s.grid == null else "전력망: 공급 %d / 수요 %d" % [s.grid.supply, s.grid.demand])
+		StructureDef.Kind.SPRINKLER:
+			lines.append("닿는 밭 %d곳. 자라는 작물에 물을 줘 성장을 두 배로 한다." % s.targets.size())
+			lines.append("전력: %s" % ("연결 안 됨" if s.grid == null else "충족률 %d%%" % (s.grid.ratio / 10)))
+		StructureDef.Kind.HARVESTER:
+			lines.append("닿는 밭 %d곳. 다 자란 작물을 거두고 같은 작물을 다시 심는다." % s.targets.size())
+			lines.append("전력: %s" % ("연결 안 됨" if s.grid == null else "충족률 %d%%" % (s.grid.ratio / 10)))
+			if s.out_count > 0:
+				var crop_item := db.item_def(s.out_item)
+				lines.append("모은 것: %s %d / %d" % [crop_item.display_name, s.out_count, int(s.def.params.get("buffer", 0))])
+				buttons.append(["%s 꺼내기" % crop_item.display_name, "take", [s.id, String(crop_item.id), 9999], true])
+			else:
+				lines.append("모은 것 없음. 출력 포트(주황 화살표)에 벨트를 이으면 공장으로 보낸다.")
 		StructureDef.Kind.GENERATOR:
-			lines.append("연료 %d%s" % [s.fuel_count, "  · 연소 중 (%d초 남음)" % (s.burn_left / 10) if s.burn_left > 0 else ""])
+			if s.def.fuels.is_empty():
+				lines.append("연료 없이 돈다. 출력 %d%s" % [s.def.power_gen * s.bonus_pct / 100,
+					"  (복원된 구역 보너스 +50%)" if s.bonus_pct > 100 else "  · 복원된 구역 안에 놓으면 +50%"])
+			else:
+				lines.append("연료 %d%s" % [s.fuel_count, "  · 연소 중 (%d초 남음)" % (s.burn_left / 10) if s.burn_left > 0 else ""])
 			if s.grid != null:
 				lines.append("전력망: 공급 %d / 수요 %d" % [s.grid.supply, s.grid.demand])
 			for fuel: int in s.def.fuels:

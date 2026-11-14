@@ -18,6 +18,9 @@ const KIND_COLORS: Dictionary[int, Color] = {
 	StructureDef.Kind.WORKBENCH: Color(0.6, 0.45, 0.3),
 	StructureDef.Kind.DECOR: Color(0.75, 0.6, 0.45),
 	StructureDef.Kind.BEACON: Color(0.35, 0.85, 0.75),
+	StructureDef.Kind.BATTERY: Color(0.9, 0.75, 0.25),
+	StructureDef.Kind.SPRINKLER: Color(0.35, 0.6, 0.9),
+	StructureDef.Kind.HARVESTER: Color(0.55, 0.75, 0.35),
 	-2: Color(0.35, 0.85, 0.5),
 }
 const ITEM_COLORS: Array[Color] = [
@@ -203,7 +206,8 @@ func _add(s: SimStructure) -> void:
 				light.position = top + Vector3(0, 0.2, 0)
 				root.add_child(light)
 	if s.kind in [StructureDef.Kind.CRAFTER, StructureDef.Kind.STORAGE, StructureDef.Kind.GENERATOR,
-			StructureDef.Kind.PLOT, StructureDef.Kind.WORKBENCH, StructureDef.Kind.BEACON]:
+			StructureDef.Kind.PLOT, StructureDef.Kind.WORKBENCH, StructureDef.Kind.BEACON,
+			StructureDef.Kind.BATTERY, StructureDef.Kind.HARVESTER]:
 		var label := Label3D.new()
 		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		label.pixel_size = 0.005
@@ -301,7 +305,14 @@ func _process(_delta: float) -> void:
 					total += s.store[item]
 				_labels[id].text = "보관 %d" % total
 			StructureDef.Kind.GENERATOR:
-				_labels[id].text = "연료 %d%s" % [s.fuel_count, " · 연소 중" if s.burn_left > 0 else ""]
+				if s.def.fuels.is_empty():
+					_labels[id].text = "출력 %d%s" % [s.def.power_gen * s.bonus_pct / 100, " (복원 보너스)" if s.bonus_pct > 100 else ""]
+				else:
+					_labels[id].text = "연료 %d%s" % [s.fuel_count, " · 연소 중" if s.burn_left > 0 else ""]
+			StructureDef.Kind.BATTERY:
+				_labels[id].text = "충전 %d%%" % (s.charge * 100 / maxi(int(s.def.params.get("capacity", 1)), 1))
+			StructureDef.Kind.HARVESTER:
+				_labels[id].text = "%s %d" % [sim.db.item_def(s.out_item).display_name, s.out_count] if s.out_count > 0 else "수확기"
 			StructureDef.Kind.BEACON:
 				_labels[id].text = "복원 %d%%" % sim.zone_progress(s.zone)
 			StructureDef.Kind.PLOT:

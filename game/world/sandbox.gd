@@ -906,6 +906,31 @@ func _build_test() -> void:
 			or StructureView.port_markers(Registry.db.structures[&"floor"], Vector3i.ZERO, 0).size() != 0:
 		errors.append("포트 표시 개수가 다름")
 
+	# 새 설비가 건축 목록에 있고, 벨트의 끝점이 높으면 경사 벨트가 된다.
+	for id: StringName in [&"belt_fast", &"solar_panel", &"wind_turbine", &"battery", &"sprinkler", &"harvester"]:
+		build.select(id)
+		if build.selected().id != id:
+			errors.append("건축 목록에 %s 가 없음" % id)
+	World.grant(1, {"iron_ingot": 10})
+	build.set_active(true)
+	build.select(&"belt")
+	build.update_target(Vector3(-4.5, 0, -6.5), Vector3.UP, true)
+	build.confirm()
+	build.update_target(Vector3(1.5, 4.2, -6.5), Vector3.UP, true)   # 2층 바닥 위(벽 위에 올린 바닥)
+	var slope: Array = build._target.get("path", [])
+	if build.reason != "" or slope.size() != 7 or (slope[-1] as Vector3i).y != 4 or (slope[0] as Vector3i).y != 0:
+		errors.append("경사 벨트 미리보기: '%s', 칸 %d" % [build.reason, slope.size()])
+	build.confirm()
+	if not World.sim.occupancy.has(Vector3i(1, 4, -7)):
+		errors.append("경사 벨트 설치 실패")
+	build.select(&"belt")
+	build.update_target(Vector3(-4.5, 0, -3.5), Vector3.UP, true)
+	build.confirm()
+	build.update_target(Vector3(-3.5, 4.2, -3.5), Vector3.UP, true)   # 한 칸 가서 4m를 오를 수는 없다
+	if build.reason != "too_steep":
+		errors.append("너무 가파른 벨트가 '%s' (기대 too_steep)" % build.reason)
+	build.set_active(false)
+
 	# 건축 구역: 구역 밖은 안 되고, 높은 단 위에서는 그 높이에 맞춰 놓인다.
 	World.grant(1, {"iron_ingot": 20})
 	build.set_active(true)

@@ -45,6 +45,9 @@ var belts: Array[SimStructure] = []
 var providers: Array[SimStructure] = []
 var plots: Array[SimStructure] = []
 var beacons: Array[SimStructure] = []
+var batteries: Array[SimStructure] = []
+var sprinklers: Array[SimStructure] = []
+var harvesters: Array[SimStructure] = []
 
 var grids: Array[SimPowerGrid] = []
 var belt_order: Array[SimStructure] = []  ## 하류 먼저
@@ -278,6 +281,12 @@ func place(def_id: StringName, cell: Vector3i, rot: int = 0, by: String = "", fo
 				if z.beacon_site == cell:
 					s.zone = z.index
 			_insert_sorted(beacons, s)
+		StructureDef.Kind.BATTERY:
+			_insert_sorted(batteries, s)
+		StructureDef.Kind.SPRINKLER:
+			_insert_sorted(sprinklers, s)
+		StructureDef.Kind.HARVESTER:
+			_insert_sorted(harvesters, s)
 	if def.power_radius > 0:
 		_insert_sorted(providers, s)
 	return s
@@ -314,6 +323,14 @@ func place_free(def_id: StringName, pos_mm: Vector3i, yaw_deg: int, by: String =
 	return s
 
 
+## 벨트의 한 걸음이 향하는 수평 방향(0..3). 수평으로 한 칸, 높이로는 한 칸까지 오르내릴 수 있다. 아니면 -1.
+static func belt_step_dir(from: Vector3i, to: Vector3i) -> int:
+	var d := to - from
+	if absi(d.y) > 1:
+		return -1
+	return DIRV.find(Vector3i(d.x, 0, d.z))
+
+
 ## 벨트 한 줄을 설치한다. 칸은 상류에서 하류 순서이고 이웃한 칸끼리 수평으로 붙어 있어야 한다.
 ## 한 칸짜리 벨트는 dir로 방향을 준다.
 func can_place_belt(path: Array[Vector3i], dir: int = -1, check_support: bool = true) -> String:
@@ -327,11 +344,13 @@ func can_place_belt(path: Array[Vector3i], dir: int = -1, check_support: bool = 
 			return "occupied"
 		if check_support and _site(path[i]) != "":
 			return _site(path[i])
-		if check_support and not _cell_supported(path[i]):
-			return "no_support"
 		seen[path[i]] = true
-		if i > 0 and DIRV.find(path[i] - path[i - 1]) < 0:
+		if i > 0 and belt_step_dir(path[i - 1], path[i]) < 0:
 			return "not_adjacent"
+		# 경사 구간(앞이나 뒤 칸과 높이가 다른 칸)은 스스로 버틴다. 평평한 칸은 받침이 있어야 한다.
+		var sloped := (i > 0 and path[i - 1].y != path[i].y) or (i < path.size() - 1 and path[i + 1].y != path[i].y)
+		if check_support and not sloped and not _cell_supported(path[i]):
+			return "no_support"
 	return ""
 
 
@@ -345,8 +364,8 @@ func place_belt(def_id: StringName, path: Array[Vector3i], by: String = "", dir:
 		s.dir_in = dir
 		s.dir_out = dir
 	else:
-		s.dir_in = DIRV.find(path[1] - path[0])
-		s.dir_out = DIRV.find(path[-1] - path[-2])
+		s.dir_in = belt_step_dir(path[0], path[1])
+		s.dir_out = belt_step_dir(path[-2], path[-1])
 	s.period = int(def.params.get("period", 5))
 	s.slots.resize(path.size())
 	for c in path:
@@ -377,7 +396,8 @@ func remove(id: int) -> Variant:
 			for c in footprint_cells(s.def, s.cell, s.rot):
 				occupancy.erase(c)
 	structures.erase(id)
-	for list: Array[SimStructure] in [crafters, generators, storages, junctions, belts, providers, plots, decors, beacons]:
+	for list: Array[SimStructure] in [crafters, generators, storages, junctions, belts, providers, plots, decors, beacons,
+			batteries, sprinklers, harvesters]:
 		list.erase(s)
 	_dirty = true
 	return contents
@@ -407,6 +427,9 @@ func contents_of(s: SimStructure) -> Dictionary[int, int]:
 			for v in s.slots:
 				if v != 0:
 					out[v - 1] = out.get(v - 1, 0) + 1
+		StructureDef.Kind.HARVESTER:
+			if s.out_count > 0 and s.out_item >= 0:
+				out[s.out_item] = s.out_count
 		StructureDef.Kind.PLOT:
 			# 자라던 작물은 씨앗으로 돌려준다.
 			if s.crop >= 0:
@@ -447,6 +470,10 @@ func take(id: int, item_id: StringName, count: int) -> int:
 	if s == null or item < 0 or count <= 0:
 		return 0
 	if s.kind == StructureDef.Kind.CRAFTER and s.recipe != null and s.recipe.out_item == item:
+		var n := mini(count, s.out_count)
+		s.out_count -= n
+		return n
+	if s.kind == StructureDef.Kind.HARVESTER and s.out_item == item:
 		var n := mini(count, s.out_count)
 		s.out_count -= n
 		return n
@@ -758,10 +785,24 @@ func tick() -> void:
 		if m.grid != null:
 			m.grid.demand += m.def.power_use
 
+	# 관수기와 수확기는 돌볼 작물이 있을 때만 전력을 쓴다.
+	for list: Array[SimStructure] in [sprinklers, harvesters]:
+		for s in list:
+			if s.grid == null:
+				continue
+			for p in s.targets:
+				if p.crop >= 0:
+					s.grid.demand += s.def.power_use
+					break
+
 	var t1 := Time.get_ticks_usec()
 	# 2. 전력: 수요가 있을 때만 연료를 태운다.
 	for gen in generators:
 		var grid := gen.grid
+		if gen.def.fuels.is_empty():
+			# 태양광·풍력: 연료 없이 늘 돈다.
+			grid.supply += gen.def.power_gen * gen.bonus_pct / 100
+			continue
 		if gen.burn_left == 0 and gen.fuel_count > 0 and grid.demand > 0:
 			gen.fuel_count -= 1
 			gen.burn_left = gen.def.fuels[gen.fuel_item]
@@ -770,6 +811,21 @@ func tick() -> void:
 		if gen.burn_left > 0:
 			gen.burn_left -= 1
 			grid.supply += gen.def.power_gen
+	# 축전지: 남으면 채우고 모자라면 내놓는다(ID 순서대로).
+	for b in batteries:
+		var g := b.grid
+		if g == null:
+			continue
+		var rate := int(b.def.params.get("rate", 0))
+		var spare := g.supply - g.demand
+		if spare > 0:
+			var take_in := mini(mini(rate, spare), int(b.def.params.get("capacity", 0)) - b.charge)
+			b.charge += take_in
+			g.supply -= take_in   # 저장한 만큼은 이번 틱의 공급에서 빠진다
+		elif spare < 0:
+			var give := mini(mini(rate, -spare), b.charge)
+			b.charge -= give
+			g.supply += give
 	for g in grids:
 		if g.demand <= 0 or g.supply >= g.demand:
 			g.ratio = 1000 if g.supply > 0 or g.demand <= 0 else 0
@@ -825,6 +881,31 @@ func tick() -> void:
 				j.j_item = 0
 				j.rr = (idx + 1) % n
 				break
+
+	# 관수기: 닿는 밭 중 자라는 것에 물을 준다. 수확기: 다 자란 것을 거두고 같은 작물을 다시 심는다.
+	for sp in sprinklers:
+		if sp.grid == null or sp.grid.ratio <= 0:
+			continue
+		for p in sp.targets:
+			if p.crop >= 0 and not p.watered and p.growth < db.crops[p.crop].grow_ticks:
+				p.watered = true
+	for h in harvesters:
+		if h.grid != null and h.grid.ratio > 0:
+			var cap := int(h.def.params.get("buffer", 24))
+			for p in h.targets:
+				if p.crop < 0 or p.growth < db.crops[p.crop].grow_ticks:
+					continue
+				var crop := db.crops[p.crop]
+				# 한 가지 작물만 담는다. 자리가 없으면 그대로 둔다.
+				if (h.out_count > 0 and h.out_item != crop.product_item) or h.out_count + crop.yield_count > cap:
+					continue
+				h.out_item = crop.product_item
+				h.out_count += crop.yield_count
+				p.growth = 0
+				p.watered = false
+		if h.out_count > 0 and not h.out_lines.is_empty():
+			if _belt_push(h.out_lines[0], h.out_item):
+				h.out_count -= 1
 
 	# 6. 밭: 물을 준 밭은 다음 성장 단계까지 두 배로 자란다.
 	for p in plots:
@@ -929,6 +1010,7 @@ func _accept(s: SimStructure, item: int) -> bool:
 				# 복원 완료: 그 구역에 건축할 수 있게 된다.
 				var u := db.zones[s.zone].unlock_zone
 				add_build_zone(u[0], u[1], u[2], u[3], u[4])
+				_dirty = true   # 복원된 구역의 친환경 발전 보너스를 다시 계산한다
 			return true
 		StructureDef.Kind.GENERATOR:
 			if not s.def.fuels.has(item) or s.fuel_count >= int(s.def.params.get("fuel_cap", 10)):
@@ -972,7 +1054,7 @@ func _rebuild_topology() -> void:
 
 	# 포트의 바깥 칸 → [구조물, 방향, 입출력]
 	var port_map: Dictionary[Vector3i, Array] = {}
-	for list: Array[SimStructure] in [crafters, generators, storages, junctions, beacons]:
+	for list: Array[SimStructure] in [crafters, generators, storages, junctions, beacons, harvesters]:
 		for s in list:
 			for i in s.def.port_cells.size():
 				var dir := (s.def.port_dirs[i] + s.rot) & 3
@@ -1012,6 +1094,26 @@ func _rebuild_topology() -> void:
 
 	_rebuild_power()
 
+	# 관수기와 수확기가 닿는 밭(같은 높이, 가로세로 range칸 안).
+	for list: Array[SimStructure] in [sprinklers, harvesters]:
+		for s in list:
+			s.targets.clear()
+			var reach_cells := int(s.def.params.get("range", 0))
+			for p in plots:
+				var d := p.cell - s.cell
+				if d.y == 0 and absi(d.x) <= reach_cells and absi(d.z) <= reach_cells:
+					s.targets.append(p)
+	# 태양광·풍력은 복원이 끝난 구역 안에서 출력이 1.5배다.
+	for gen in generators:
+		gen.bonus_pct = 100
+		if not gen.def.fuels.is_empty():
+			continue
+		for z in db.zones:
+			var u := z.unlock_zone
+			if zone_restored(z.index) and gen.cell.x >= u[0] and gen.cell.x < u[0] + u[2] \
+					and gen.cell.z >= u[1] and gen.cell.z < u[1] + u[3]:
+				gen.bonus_pct = 150
+
 
 func _rebuild_power() -> void:
 	grids.clear()
@@ -1042,17 +1144,18 @@ func _rebuild_power() -> void:
 						b.grid = grid
 						stack.append(b)
 
-	# 소비 설비는 범위 안의 공급원 중 ID가 가장 작은 것의 전력망에 붙는다.
-	for m in crafters:
-		if m.def.power_use <= 0:
-			continue
-		var best: SimStructure = null
-		for b: SimStructure in _providers_near(buckets, m.cell, reach):
-			if (m.cell - b.cell).length_squared() <= b.def.power_radius * b.def.power_radius:
-				if best == null or b.id < best.id:
-					best = b
-		if best != null:
-			m.grid = best.grid
+	# 소비 설비와 축전지는 범위 안의 공급원 중 ID가 가장 작은 것의 전력망에 붙는다.
+	for list: Array[SimStructure] in [crafters, batteries, sprinklers, harvesters]:
+		for m in list:
+			if m.def.power_use <= 0 and m.kind != StructureDef.Kind.BATTERY:
+				continue
+			var best: SimStructure = null
+			for b: SimStructure in _providers_near(buckets, m.cell, reach):
+				if (m.cell - b.cell).length_squared() <= b.def.power_radius * b.def.power_radius:
+					if best == null or b.id < best.id:
+						best = b
+			if best != null:
+				m.grid = best.grid
 
 
 func _providers_near(buckets: Dictionary[Vector2i, Array], cell: Vector3i, reach: int) -> Array:
@@ -1117,6 +1220,11 @@ func to_dict() -> Dictionary:
 				row["dir"] = s.dir_out
 				row["slots"] = s.slots
 				row["passed"] = s.passed_total
+			StructureDef.Kind.BATTERY:
+				row["charge"] = s.charge
+			StructureDef.Kind.HARVESTER:
+				row["out_item"] = s.out_item
+				row["out"] = s.out_count
 			StructureDef.Kind.PLOT:
 				row["crop"] = String(db.crops[s.crop].id) if s.crop >= 0 else ""
 				row["growth"] = s.growth
@@ -1213,6 +1321,12 @@ static func from_dict(content: ContentDB, d: Dictionary) -> SimWorld:
 					s.out_count = int(row["out"])
 					s.state = int(row["state"])
 					s.produced_total = int(row["produced"])
+			StructureDef.Kind.BATTERY:
+				s.charge = int(row.get("charge", 0))
+			StructureDef.Kind.HARVESTER:
+				var saved_item := int(row.get("out_item", -1))
+				s.out_item = remap[saved_item] if saved_item >= 0 else -1
+				s.out_count = int(row.get("out", 0)) if s.out_item >= 0 else 0
 			StructureDef.Kind.PLOT:
 				var crop := content.crop_by_id(StringName(str(row["crop"])))
 				s.crop = crop.index if crop != null else -1

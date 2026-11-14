@@ -10,8 +10,9 @@ const UNDO_LIMIT := 20
 ## 지을 수 있는 것들. 탭은 데이터의 tab 값으로 나뉜다.
 const CATALOG: Array[StringName] = [
 	&"floor", &"wall", &"stairs", &"roof",
-	&"belt", &"junction", &"miner", &"smelter", &"assembler", &"storage", &"bio_generator", &"power_pole", &"workbench", &"beacon",
-	&"plot", &"planter", &"fence",
+	&"belt", &"belt_fast", &"junction", &"miner", &"smelter", &"assembler", &"storage",
+	&"bio_generator", &"solar_panel", &"wind_turbine", &"battery", &"power_pole", &"workbench", &"beacon",
+	&"plot", &"sprinkler", &"harvester", &"planter", &"fence",
 	&"chair", &"table", &"lamp",
 ]
 const TAB_ORDER: Array[StringName] = [&"building", &"industry", &"nature", &"interior"]
@@ -25,6 +26,7 @@ const REASONS: Dictionary[String, String] = {
 	"too_many": "장식이 너무 많음", "need_workbench": "작업대 근처에서만", "not_found": "대상이 없음",
 	"bad_request": "잘못된 요청", "unknown_structure": "모르는 구조물", "full": "가득 참",
 	"not_buildable": "건축할 수 없는 땅", "needs_site": "골짜기의 비콘 자리에만 설치", "not_ready": "아직 캘 수 없음",
+	"too_steep": "높이 차이에 비해 벨트가 너무 짧음(한 칸에 1m씩 오른다)",
 }
 
 var player: PlayerController
@@ -210,9 +212,10 @@ func update_target(hit_pos: Vector3, hit_normal: Vector3, has_hit: bool) -> void
 				_target = {"path": [c] as Array[Vector3i]}
 				reason = sim.can_place_belt([c] as Array[Vector3i], 0)
 			else:
-				var path := belt_path(_belt_start, Vector3i(c.x, (_belt_start as Vector3i).y, c.z))
+				# 끝점의 높이가 다르면 경사 벨트가 된다(2층 바닥을 조준하면 2층으로 올라간다).
+				var path := belt_path(_belt_start, c)
 				_target = {"path": path}
-				reason = sim.can_place_belt(path, rot if path.size() == 1 else -1)
+				reason = "too_steep" if path[-1].y != c.y else sim.can_place_belt(path, rot if path.size() == 1 else -1)
 		StructureDef.Kind.BEACON:
 			# 비콘은 정해진 자리에만 선다. 그 근처를 조준하면 자리에 맞춰 준다.
 			var cell := c
@@ -244,9 +247,9 @@ func belt_path(from: Vector3i, to: Vector3i) -> Array[Vector3i]:
 		if o.size() < 2:
 			return o
 		var score := 0
-		if out_dir >= 0 and SimWorld.DIRV[out_dir] == o[1] - o[0]:
+		if out_dir >= 0 and out_dir == SimWorld.belt_step_dir(o[0], o[1]):
 			score += 1
-		if in_dir >= 0 and SimWorld.DIRV[(in_dir + 2) & 3] == o[-1] - o[-2]:
+		if in_dir >= 0 and (in_dir + 2) & 3 == SimWorld.belt_step_dir(o[-2], o[-1]):
 			score += 1
 		if score > best_score:
 			best_score = score
@@ -260,6 +263,9 @@ func _leg_path(from: Vector3i, to: Vector3i, x_first: bool) -> Array[Vector3i]:
 	for axis: int in ([0, 2] if x_first else [2, 0]):
 		while cur[axis] != to[axis]:
 			cur[axis] += signi(to[axis] - cur[axis])
+			# 높이가 다르면 수평으로 한 칸 갈 때마다 한 칸씩 오르내린다.
+			if cur.y != to.y:
+				cur.y += signi(to.y - cur.y)
 			out.append(cur)
 	return out
 
@@ -405,7 +411,8 @@ static func _display_name(def: StructureDef) -> String:
 		&"floor": "바닥", &"wall": "벽", &"stairs": "계단", &"roof": "지붕", &"belt": "벨트",
 		&"junction": "분배/합류기", &"miner": "채굴기", &"smelter": "제련기", &"assembler": "조립기",
 		&"storage": "저장소", &"bio_generator": "바이오 발전기", &"power_pole": "전력 중계 기둥",
-		&"workbench": "작업대", &"plot": "밭", &"chair": "의자", &"table": "탁자", &"lamp": "등불",
+		&"workbench": "작업대", &"plot": "밭", &"belt_fast": "고속 벨트", &"solar_panel": "태양광 패널",
+		&"wind_turbine": "풍력 발전기", &"battery": "축전지", &"sprinkler": "관수기", &"harvester": "자동 수확기", &"chair": "의자", &"table": "탁자", &"lamp": "등불",
 		&"planter": "화분", &"fence": "울타리", &"beacon": "복원 비콘",
 	}
 	return NAMES.get(def.id, String(def.id))
