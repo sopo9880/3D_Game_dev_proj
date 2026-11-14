@@ -102,6 +102,9 @@ jobs:
       - name: Vertical slice test (gather, boss, beacon, restoration)
         run: timeout 240 godot --headless -- --single --saveroot=user://ci_slice --slicetest
 
+      - name: Second zone test (gate, turrets, quarry boss, rewards)
+        run: timeout 240 godot --headless -- --single --saveroot=user://ci_zone --zonetest
+
       - name: Save and continue test
         run: tools/save_test.sh
 

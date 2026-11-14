@@ -58,7 +58,8 @@ func content_hash() -> String:
 	for c in crops:
 		parts.append("%s:%d:%d:%d:%d:%d:%d:%d" % [c.id, c.seed_item, c.product_item, c.grow_ticks, c.stages, c.yield_count, c.seed_return, c.bonus_seed_percent])
 	for z in zones:
-		parts.append("%s:%d:%d:%s:%s" % [z.id, z.capsule_item, z.capsule_points, z.beacon_site, z.unlock_zone])
+		parts.append("%s:%d:%d:%s:%s:%d:%s:%s" % [z.id, z.capsule_item, z.capsule_points, z.beacon_site, z.unlock_zone,
+			z.requires, z.reward_items, z.reward_counts])
 	for t in techs:
 		parts.append("%s:%s:%s:%d:%s" % [t.id, t.cost_items, t.cost_counts, t.requires, t.unlocks])
 	parts.append("kit:%s:%d:%d:%s" % [starting_kit, max_build_height, max_decor, gather_ticks])
@@ -301,6 +302,7 @@ func zone_by_id(id: StringName) -> ZoneDef:
 
 
 func _load_zones(rows: Array) -> void:
+	var pending: Dictionary[StringName, StringName] = {}
 	for row: Dictionary in rows:
 		var z := ZoneDef.new()
 		z.id = StringName(str(row.get("id", "")))
@@ -315,7 +317,19 @@ func _load_zones(rows: Array) -> void:
 			continue
 		for v: Variant in u:
 			z.unlock_zone.append(int(v))
+		for pair: Variant in row.get("rewards", []):
+			var st := _stack("구역 %s 보상" % z.id, pair)
+			z.reward_items.append(st.x)
+			z.reward_counts.append(st.y)
+		if row.has("requires"):
+			pending[z.id] = StringName(str(row["requires"]))
 		zones.append(z)
+	for id: StringName in pending:
+		var req := zone_by_id(pending[id])
+		if req == null:
+			errors.append("구역 %s: 없는 선행 구역 '%s'" % [id, pending[id]])
+		else:
+			zone_by_id(id).requires = req.index
 
 
 func _v3(v: Variant) -> Vector3i:

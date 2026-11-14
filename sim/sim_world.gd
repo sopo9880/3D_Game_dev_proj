@@ -203,6 +203,9 @@ func can_place(def_id: StringName, cell: Vector3i, rot: int, check_support: bool
 		for z in db.zones:
 			if z.beacon_site == cell:
 				site_ok = true
+				# 앞 구역을 먼저 복원해야 다음 구역의 비콘을 세울 수 있다.
+				if z.requires >= 0 and not zone_restored(z.requires):
+					return "locked"
 		if not site_ok:
 			return "needs_site"
 	match def.kind:
@@ -1053,8 +1056,13 @@ func _accept(s: SimStructure, item: int) -> bool:
 			restore[s.zone] = mini(zone_progress(s.zone) + db.zones[s.zone].capsule_points, 100)
 			if restore[s.zone] >= 100:
 				# 복원 완료: 그 구역에 건축할 수 있게 된다.
-				var u := db.zones[s.zone].unlock_zone
+				var zone_def := db.zones[s.zone]
+				var u := zone_def.unlock_zone
 				add_build_zone(u[0], u[1], u[2], u[3], u[4])
+				# 복원 보상: 지금까지 이 월드에 왔던 모든 플레이어가 받는다.
+				for key: String in inventories:
+					for i in zone_def.reward_items.size():
+						inv_add(key, zone_def.reward_items[i], zone_def.reward_counts[i])
 				_dirty = true   # 복원된 구역의 친환경 발전 보너스를 다시 계산한다
 			return true
 		StructureDef.Kind.GENERATOR:

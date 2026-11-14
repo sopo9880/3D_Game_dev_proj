@@ -144,7 +144,11 @@ func _on_shot_seen(peer: int, weapon_id: StringName, from: Vector3, to: Vector3)
 
 
 func _on_projectile(id: int, kind: StringName, pos: Vector3, vel: Vector3) -> void:
-	var node := fx.orb(Color(0.6, 1.0, 0.3) if kind == &"spit" else Color(0.95, 0.8, 0.3), 0.14 if kind == &"spit" else 0.11)
+	var node: Node3D
+	match kind:
+		&"spit": node = fx.orb(Color(0.6, 1.0, 0.3), 0.14)
+		&"bolt": node = fx.orb(Color(1.0, 0.45, 0.2), 0.09)
+		_: node = fx.orb(Color(0.95, 0.8, 0.3), 0.11)
 	node.global_position = pos
 	_orbs[id] = [node, vel, kind]
 

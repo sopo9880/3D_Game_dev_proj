@@ -15,7 +15,7 @@
 
 ## 콘텐츠 정의 (JSON)
 
-`res://data/` 아래 JSON 파일(`items.json`, `recipes.json`, `structures.json`, `weapons.json`). 시작 시 읽어서 아래의 정의 객체(`RefCounted`)로 만든다. `.tres` 대신 JSON을 쓰는 이유는 [D-026](07_decisions.md) 참고. 아래 표는 정의 객체의 필드다(JSON의 키 이름은 `data/`의 실제 파일이 기준).
+`res://data/` 아래 JSON 파일(`items.json`, `recipes.json`, `structures.json`, `weapons.json`, `zones.json`, `enemies.json`, `map_slice.json` 등). 구역은 `zones.json`에 규칙(선행 구역, 캡슐, 비콘 자리, 보상)이, `map_slice.json`의 `zones` 목록에 지형과 전투 배치(범위, 입구, 출현 지점과 적 종류, 우두머리)가 있다. 시작 시 읽어서 아래의 정의 객체(`RefCounted`)로 만든다. `.tres` 대신 JSON을 쓰는 이유는 [D-026](07_decisions.md) 참고. 아래 표는 정의 객체의 필드다(JSON의 키 이름은 `data/`의 실제 파일이 기준).
 
 ### ItemDef
 

@@ -123,3 +123,46 @@ func test_restoration_material_budget() -> void:
 			leaves = capsule.in_counts[i] * capsules_needed
 	eq(crystals, 10, "오염 결정 10")
 	eq(leaves, 20, "빛잎 20")
+
+
+func test_second_zone_is_locked_until_the_first_is_restored() -> void:
+	var quarry := db.zone_by_id(&"rusted_quarry")
+	check(quarry != null and quarry.requires == zone.index, "채석장은 골짜기 다음")
+	w.add_build_zone(quarry.beacon_site.x - 2, quarry.beacon_site.z - 2, 7, 7, 0)
+	eq(w.can_place(&"beacon", quarry.beacon_site, 0), "locked", "골짜기 복원 전에는 잠김")
+	var b := w.place(&"beacon", zone.beacon_site)
+	w.inv_add("ann", zone.capsule_item, 40)
+	w.insert_from("ann", b.id, &"purifier_capsule", 10)
+	eq(w.can_place(&"beacon", quarry.beacon_site, 0), "", "골짜기 복원 뒤에는 열림")
+	var b2 := w.place(&"beacon", quarry.beacon_site)
+	check(b2 != null and b2.zone == quarry.index, "채석장 비콘")
+	eq(w.insert_from("ann", b2.id, &"purifier_capsule", 99), 20, "캡슐 20개가 든다")
+	check(w.zone_restored(quarry.index), "채석장 복원")
+	# 저장하고 불러와도 그대로다.
+	var copy := SimWorld.from_dict(db, w.to_dict())
+	check(copy.zone_restored(quarry.index) and copy.zone_restored(zone.index), "두 구역 모두 복원 상태로 불러옴")
+	eq(copy.state_hash(), w.state_hash(), "해시")
+
+
+func test_restoring_rewards_every_player_once() -> void:
+	w.ensure_player("bob")
+	var seed := db.item_index(&"sunroot_seed")
+	var b := w.place(&"beacon", zone.beacon_site)
+	w.inv_add("ann", zone.capsule_item, 20)
+	w.insert_from("ann", b.id, &"purifier_capsule", 9)
+	eq(w.inv_count("bob", seed), 0, "끝나기 전에는 보상 없음")
+	w.insert_from("ann", b.id, &"purifier_capsule", 5)
+	eq(w.inv_count("ann", seed), 3, "넣은 사람")
+	eq(w.inv_count("bob", seed), 3, "함께 있던 사람")
+	w.insert_from("ann", b.id, &"purifier_capsule", 5)
+	eq(w.inv_count("ann", seed), 3, "보상은 한 번만")
+
+
+func test_sunroot_grows_and_makes_more_fuel() -> void:
+	var crop: CropDef = null
+	for c in db.crops:
+		if c.id == &"sunroot":
+			crop = c
+	check(crop != null and crop.grow_ticks == 1800, "햇뿌리 작물")
+	var r := db.recipes[&"make_biofuel_sunroot"]
+	eq(r.out_count, 2, "햇뿌리 하나로 연료 둘")

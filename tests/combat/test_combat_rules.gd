@@ -65,8 +65,8 @@ func test_loot_rolls_follow_probabilities() -> void:
 func test_enemy_data_is_valid() -> void:
 	var db := ContentDB.load_from_dir("res://data")
 	var defs := EnemyDef.load_all("res://data/enemies.json")
-	eq(defs.size(), 3, "적 종류(돌진형, 원거리형, 수호체)")
+	eq(defs.size(), 6, "적 종류(골짜기 3 + 채석장 3)")
 	for d in defs:
-		check(d.hp > 0.0 and d.speed > 0.0 and d.attack_damage > 0.0, "%s 수치" % d.id)
+		check(d.hp > 0.0 and (d.speed > 0.0 or d.kind == &"turret") and d.attack_damage > 0.0, "%s 수치" % d.id)
 		for row: Array in d.loot:
 			check(db.items.has(StringName(str(row[0]))), "%s 전리품 '%s' 는 존재하는 아이템" % [d.id, row[0]])

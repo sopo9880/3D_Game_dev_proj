@@ -29,6 +29,7 @@
   5. 전투 점검 (`-- --single --combattest`: 적 2종, 사격 검증, 수류탄, 쓰러짐과 부활)
   6. 건축 점검 (`-- --single --buildtest`: 건축 모드, 비용과 환급, 되돌리기, 제작, 밭, 탄약, 비동기 저장)
   7. 슬라이스 점검 (`-- --single --slicetest`: 손 채굴, 골짜기의 적, 수호체, 비콘, 복원, 저장)
+  7-1. 두 번째 구역 점검 (`-- --single --zonetest`: 잠긴 입구, 골짜기 복원과 보상, 포탑과 롤러, 채석 거신, 채석장 복원, 저장)
   8. 저장 점검 (`tools/save_test.sh`: 저장한 뒤 새로 실행해 같은 상태로 이어지는가)
   9. 내보낸 팩으로 사격장 자동 점검(이동, 사격, 재장전, 연사 속도, 올라타기, 벽 달리기, 아레나 규칙)
 - **Windows 빌드는 푸시마다 만들지 않는다.** `v0.2.0` 같은 태그를 푸시하거나 Actions에서 수동 실행(Run workflow)할 때만 만들어 올린다.
@@ -68,6 +69,10 @@ godot --headless -- --single --buildtest
 
 ```bash
 godot --headless -- --single --slicetest
+```
+
+```bash
+godot --headless -- --single --zonetest
 ```
 
 ```bash

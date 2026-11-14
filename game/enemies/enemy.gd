@@ -38,6 +38,9 @@ var _boss_t: float = 2.0
 var _dash_dir: Vector3 = Vector3.FORWARD
 var _dash_hit: Dictionary[int, bool] = {}
 var _next_is_charge: bool = true
+var _next_is_ring: bool = false
+var _burst_left: int = 0
+var _burst_t: float = 0.0
 var _instant: bool = false
 var _mat: StandardMaterial3D
 var _label: Label3D
@@ -61,6 +64,8 @@ func _ready() -> void:
 	_mat.albedo_color = Color(0.55, 0.2, 0.5) if def.kind == &"melee" else Color(0.3, 0.55, 0.3)
 	if def.kind == &"boss":
 		_mat.albedo_color = Color(0.3, 0.12, 0.18)
+	if def.tint.size() == 3:
+		_mat.albedo_color = Color(def.tint[0], def.tint[1], def.tint[2])
 	_mat.emission_enabled = true
 	_mat.emission = Color.BLACK
 	_mat.roughness = 0.7
@@ -131,9 +136,12 @@ func stagger(away: Vector3) -> void:
 	_windup = -1.0
 	attacking = false
 	_attack_cd = maxf(_attack_cd, 0.7)
+	_burst_left = 0
 	_stun = 0.35
 	away.y = 0.0
-	velocity = away.normalized() * 4.0 + Vector3(0, 2.0, 0)
+	# 포탑은 밀리지 않는다.
+	if def.kind != &"turret":
+		velocity = away.normalized() * 4.0 + Vector3(0, 2.0, 0)
 
 
 ## 호스트: 피해를 입었다. 원거리형은 자리를 옮긴다.
@@ -185,6 +193,7 @@ func _physics_process(delta: float) -> void:
 		match def.kind:
 			&"melee": horizontal = _think_melee(peer, goal, dist, dir, delta)
 			&"boss": horizontal = _think_boss(peer, goal, dist, dir, delta)
+			&"turret": horizontal = _think_turret(peer, goal, dist, delta)
 			_: horizontal = _think_ranged(peer, goal, dist, dir, delta)
 		if _boss_state == Boss.DASH:
 			rotation.y = atan2(-_dash_dir.x, -_dash_dir.z)
@@ -196,6 +205,7 @@ func _physics_process(delta: float) -> void:
 		attacking = false
 		stunned = false
 		_windup = -1.0
+		_burst_left = 0
 		_boss_state = Boss.CHASE
 	var h := Vector3(velocity.x, 0, velocity.z).move_toward(horizontal, 30.0 * delta)
 	if _instant:
@@ -263,6 +273,35 @@ func _think_ranged(peer: int, goal: Vector3, dist: float, dir: Vector3, delta: f
 	return side * def.speed * 0.5
 
 
+## 포탑: 움직이지 않는다. 시야가 트이면 조준(예고)한 뒤 여러 발을 이어 쏜다. 엄폐하면 못 쏜다.
+func _think_turret(peer: int, goal: Vector3, dist: float, delta: float) -> Vector3:
+	var chest := goal + Vector3(0, 0.9, 0)
+	if _burst_left > 0:
+		_burst_t -= delta
+		if _burst_t <= 0.0:
+			_burst_t = def.burst_gap
+			_burst_left -= 1
+			var from := eye_position()
+			var aim := (chest - from).normalized()
+			Combat.spawn_spit(from + aim * 0.6, aim * def.projectile_speed, def.attack_damage, &"bolt")
+			if _burst_left == 0:
+				attacking = false
+				_attack_cd = def.attack_interval
+		return Vector3.ZERO
+	if _windup >= 0.0:
+		_windup -= delta
+		if _windup <= 0.0:
+			_windup = -1.0
+			_burst_left = maxi(int(def.burst_count), 1)
+			_burst_t = 0.0
+		return Vector3.ZERO
+	if _attack_cd <= 0.0 and dist <= def.attack_range and Combat.has_line_of_sight(eye_position(), chest):
+		_windup = def.attack_windup
+		_windup_peer = peer
+		attacking = true
+	return Vector3.ZERO
+
+
 ## 우두머리: 돌진(예고 → 직선 돌진, 벽에 부딪히면 약점 노출)과 포격(바닥 표시 → 폭발)을 번갈아 한다.
 func _think_boss(peer: int, goal: Vector3, dist: float, dir: Vector3, delta: float) -> Vector3:
 	_boss_t -= delta
@@ -307,7 +346,12 @@ func _think_boss(peer: int, goal: Vector3, dist: float, dir: Vector3, delta: flo
 		Boss.CAST:
 			if _boss_t <= 0.0:
 				attacking = false
-				Combat.boss_barrage(self, peer)
+				# 고리 폭발을 가진 우두머리는 포격과 번갈아 쓴다.
+				if def.ring_count > 0.0 and _next_is_ring:
+					Combat.boss_ring(self)
+				else:
+					Combat.boss_barrage(self, peer)
+				_next_is_ring = not _next_is_ring
 				_boss_state = Boss.CHASE
 				_boss_t = def.attack_interval
 			return Vector3.ZERO

@@ -18,5 +18,27 @@
    "charge_speed": 17, "charge_time": 1.4, "stun_time": 2.0,
    "barrage_damage": 25, "barrage_radius": 3.0, "barrage_delay": 1.2, "summon_count": 3,
    "radius": 1.2, "height": 3.2, "head_radius": 0.55,
-   "loot": [["scrap", 5, 1.0], ["taint_crystal", 5, 1.0], ["relic_blueprint", 2, 1.0]]}
+   "loot": [["scrap", 5, 1.0], ["taint_crystal", 5, 1.0], ["relic_blueprint", 2, 1.0]]},
+
+  {"id": "roller", "name": "굴착 롤러", "kind": "melee",
+   "hp": 110, "speed": 8.0, "aggro_range": 50,
+   "attack_damage": 20, "attack_range": 2.1, "attack_windup": 0.45, "attack_interval": 1.3,
+   "radius": 0.6, "height": 1.2, "head_radius": 0.24, "tint": [0.62, 0.36, 0.16],
+   "loot": [["scrap", 2, 0.8], ["taint_crystal", 1, 0.3]]},
+
+  {"id": "sentry", "name": "감시 포탑", "kind": "turret",
+   "hp": 90, "speed": 0.0, "aggro_range": 38,
+   "attack_damage": 7, "attack_range": 36, "attack_windup": 0.7, "attack_interval": 2.4,
+   "burst_count": 3, "burst_gap": 0.16, "projectile_speed": 34,
+   "radius": 0.5, "height": 1.7, "head_radius": 0.22, "tint": [0.35, 0.38, 0.45],
+   "loot": [["scrap", 2, 0.9], ["taint_crystal", 1, 0.4], ["relic_blueprint", 1, 0.05]]},
+
+  {"id": "excavator", "name": "채석 거신", "kind": "boss",
+   "hp": 2600, "speed": 3.0, "aggro_range": 70,
+   "attack_damage": 40, "attack_range": 3.4, "attack_windup": 1.4, "attack_interval": 2.2,
+   "charge_speed": 19, "charge_time": 1.5, "stun_time": 2.0,
+   "barrage_damage": 28, "barrage_radius": 3.2, "barrage_delay": 1.2, "summon_count": 2,
+   "ring_count": 8, "ring_radius": 7.0, "summon_type": "roller",
+   "radius": 1.5, "height": 3.8, "head_radius": 0.6, "tint": [0.4, 0.22, 0.1],
+   "loot": [["scrap", 8, 1.0], ["taint_crystal", 6, 1.0], ["relic_blueprint", 3, 1.0]]}
 ]

@@ -24,10 +24,17 @@ var barrage_damage: float = 25.0
 var barrage_radius: float = 3.0
 var barrage_delay: float = 1.2
 var summon_count: float = 3.0
+var summon_type: StringName = &"crawler"
+var ring_count: float = 0.0        ## 0보다 크면 포격 대신 번갈아 고리 폭발을 쓴다
+var ring_radius: float = 6.0
+# 포탑 전용
+var burst_count: float = 1.0
+var burst_gap: float = 0.15
 var radius: float = 0.4
 var height: float = 1.2
 var head_radius: float = 0.2
 var loot: Array = []
+var tint: Array = []                ## [r, g, b]. 비어 있으면 종류별 기본 색
 
 
 static func load_all(path: String) -> Array[EnemyDef]:

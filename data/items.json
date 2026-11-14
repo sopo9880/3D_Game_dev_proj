@@ -2,6 +2,8 @@
   {"id": "iron_ore",         "name": "철광석",      "stack": 100, "category": "raw"},
   {"id": "iron_ingot",       "name": "철 주괴",     "stack": 100, "category": "material"},
   {"id": "glowleaf",         "name": "빛잎",        "stack": 100, "category": "crop"},
+  {"id": "sunroot",          "name": "햇뿌리",      "stack": 100, "category": "crop"},
+  {"id": "sunroot_seed",     "name": "햇뿌리 씨앗", "stack": 100, "category": "seed"},
   {"id": "glowleaf_seed",    "name": "빛잎 씨앗",   "stack": 100, "category": "seed"},
   {"id": "biofuel",          "name": "바이오 연료", "stack": 50,  "category": "material"},
   {"id": "scrap",            "name": "고철",        "stack": 100, "category": "raw"},

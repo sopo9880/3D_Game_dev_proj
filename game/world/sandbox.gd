@@ -116,8 +116,10 @@ func _ready() -> void:
 		var tech := Registry.db.tech_by_id(tech_id)
 		hud.toast("연구 완료: %s (%s)" % [tech.display_name if tech != null else String(tech_id), by])
 		player.refresh_mods())
-	World.boss_defeated.connect(func(_zone: int) -> void:
-		hud.toast("수호체를 쓰러뜨렸습니다. 에너지 코어를 얻었습니다")
+	World.boss_defeated.connect(func(zone: int) -> void:
+		var area := map.area_of_zone(zone)
+		var boss_def := Combat.enemy_def(area.boss) if area != null else null
+		hud.toast("%s을(를) 쓰러뜨렸습니다. 에너지 코어를 얻었습니다" % (boss_def.display_name if boss_def != null else "우두머리"))
 		sfx.play(&"kill", 0.02))
 
 	World.reset.connect(_refresh_nodes)
@@ -143,6 +145,8 @@ func _ready() -> void:
 			_build_shot(arg.trim_prefix("--buildshot="))
 		elif arg.begins_with("--loadtest="):
 			_load_test(arg.trim_prefix("--loadtest="))
+		elif arg == "--zonetest":
+			_zone_test.call_deferred()
 		elif arg == "--slicetest":
 			_slice_test()
 		elif arg.begins_with("--valleyshot="):
@@ -232,12 +236,19 @@ func _apply_settings() -> void:
 	player.base_fov = float(Settings.get_value("fov"))
 
 
-func _on_zone_progress(_zone: int, progress: int) -> void:
+func _on_zone_progress(zone: int, progress: int) -> void:
+	var zone_name := Registry.db.zones[zone].display_name
 	if progress >= 100:
-		hud.toast("골짜기가 되살아났습니다! 이제 이곳에도 지을 수 있습니다")
+		hud.toast("%s이(가) 되살아났습니다! 이제 이곳에도 지을 수 있습니다" % zone_name)
 		_refresh_nodes()   # 새로 열린 건축 구역의 경계를 그린다
+		var rewards := PackedStringArray()
+		var zd := Registry.db.zones[zone]
+		for i in zd.reward_items.size():
+			rewards.append("%s %d" % [Registry.db.item_def(zd.reward_items[i]).display_name, zd.reward_counts[i]])
+		if not rewards.is_empty():
+			hud.toast("복원 보상: %s" % ", ".join(rewards))
 	else:
-		hud.toast("골짜기 복원 %d%%" % progress)
+		hud.toast("%s 복원 %d%%" % [zone_name, progress])
 
 
 ## 지금 할 일 한 줄(화면 위쪽). 월드의 상태만 보고 정한다.
@@ -272,8 +283,22 @@ func current_goal() -> String:
 	for i in steps.size():
 		if steps[i][0]:
 			next = i + 1
+	# 골짜기를 끝냈으면 다음 구역으로 이어진다.
+	if next >= steps.size() and map.areas.size() > 1 and map.areas[1].index >= 0:
+		var z2 := map.areas[1].index
+		var zd := Registry.db.zones[z2]
+		var cost2 := Registry.db.item_def(zd.capsule_item).display_name
+		steps = [
+			[sim.boss_defeated(z2) or sim.beacon_of(z2) != null, "정원 동쪽에 %s 입구가 열렸습니다. 동쪽 끝의 채석 거신을 쓰러뜨리세요 (포탑은 엄폐물로 사선을 끊으세요)" % zd.display_name],
+			[sim.beacon_of(z2) != null, "%s 한가운데에 복원 비콘을 세우세요 (에너지 코어 1, 철 주괴 30, 정밀 부품 4)" % zd.display_name],
+			[sim.zone_restored(z2), "%s을 비콘에 넣으세요 — %s 복원 %d%%" % [cost2, zd.display_name, sim.zone_progress(z2)]],
+		]
+		next = 0
+		for i in steps.size():
+			if steps[i][0]:
+				next = i + 1
 	if next >= steps.size():
-		return "목표 완료: 골짜기가 되살아났습니다. 자유롭게 짓고 가꾸세요"
+		return "목표 완료: 모든 구역이 되살아났습니다. 자유롭게 짓고 가꾸세요"
 	return "목표 %d/%d  %s" % [next + 1, steps.size(), steps[next][1]]
 
 
@@ -1211,13 +1236,16 @@ func _slice_test() -> void:
 			errors.append("복원 뒤에도 적이 나옴")
 		await _wait(9.5)
 		var bloomed := 0
-		for f: Array in map._flora:
+		var flora := map.areas[0].flora
+		for f: Array in flora:
 			if (f[0] as Node3D).visible:
 				bloomed += 1
-		if bloomed != map._flora.size():
-			errors.append("복원 뒤 식생 %d / %d" % [bloomed, map._flora.size()])
-		if not current_goal().contains("완료"):
+		if bloomed != flora.size():
+			errors.append("복원 뒤 식생 %d / %d" % [bloomed, flora.size()])
+		if not current_goal().contains("채석"):
 			errors.append("복원 뒤 목표: %s" % current_goal())
+		if World.my_count(&"sunroot_seed") != 3:
+			errors.append("복원 보상 햇뿌리 씨앗 %d개 (기대 3)" % World.my_count(&"sunroot_seed"))
 
 	# 무기 개조: 확장 탄창이 있으면 소총 탄창이 40발.
 	World.grant(1, {"ext_mag": 1})
@@ -1239,6 +1267,191 @@ func _slice_test() -> void:
 	else:
 		for e in errors:
 			print("SLICETEST FAIL: %s" % e)
+	get_tree().quit(0 if errors.is_empty() else 1)
+
+
+# ---------------------------------------------------------------------------
+# 두 번째 구역 점검 (혼자, 화면 없이): `godot --headless -- --single --zonetest`
+# 잠긴 입구 → 골짜기 복원 → 채석장의 적(포탑, 롤러) → 채석 거신 → 비콘 → 복원과 보상.
+# ---------------------------------------------------------------------------
+
+## 점검용: 그 구역의 비콘을 세우고 캡슐을 넣어 복원을 끝낸다.
+func _test_restore(zone: int, errors: PackedStringArray) -> void:
+	var zd := Registry.db.zones[zone]
+	World.grant(1, {"iron_ingot": 30, "precision_part": 4, "purifier_capsule": ceili(100.0 / zd.capsule_points)})
+	player.teleport(Vector3(zd.beacon_site) + Vector3(1.5, 0.05, 7), 0.0)
+	await _wait(0.4)
+	build.set_active(true)
+	build.select(&"beacon")
+	build.update_target(Vector3(zd.beacon_site) + Vector3(2.5, 0, 0.5), Vector3.UP, true)
+	if build.reason != "":
+		errors.append("%s 비콘 자리에서 '%s'" % [zd.display_name, build.reason])
+	build.confirm()
+	build.set_active(false)
+	var beacon := World.sim.beacon_of(zone)
+	if beacon == null:
+		errors.append("%s 비콘 설치 실패" % zd.display_name)
+		return
+	open_panel(beacon.id)
+	panel.act("insert", [beacon.id, "purifier_capsule", 9999])
+	_close_panel()
+	if not World.sim.zone_restored(zone):
+		errors.append("%s 복원이 %d%%에서 멈춤" % [zd.display_name, World.sim.zone_progress(zone)])
+
+
+func _zone_test() -> void:
+	var errors: PackedStringArray = []
+	World.settings["difficulty"] = "easy"
+	player.force_active = true
+	Save.autosave_enabled = false
+	var hazards: Array = []
+	var bolts: Array = []
+	Combat.hazard_spawned.connect(func(pos: Vector3, _r: float, _d: float) -> void: hazards.append(pos))
+	Combat.projectile_spawned.connect(func(_id: int, kind: StringName, _p: Vector3, _v: Vector3) -> void:
+		if kind == &"bolt":
+			bolts.append(1))
+	await _wait(0.6)
+	if map.areas.size() < 2:
+		print("ZONETEST FAIL: 맵에 구역이 %d개" % map.areas.size())
+		get_tree().quit(1)
+		return
+	var z1 := map.areas[0].index
+	var area := map.areas[1]
+	var z2 := area.index
+	var site2 := Registry.db.zones[z2].beacon_site
+
+	# 골짜기를 복원하기 전: 입구가 막혀 있고, 비콘을 세울 수 없고, 적도 나오지 않는다.
+	if area.gate == null:
+		errors.append("채석장 입구가 처음부터 열려 있음")
+	if World.sim.can_place(&"beacon", site2, 0) != "locked":
+		errors.append("잠긴 구역의 비콘이 '%s'" % World.sim.can_place(&"beacon", site2, 0))
+	player.teleport(Vector3(128, 0.05, -45), 0.0)
+	await _wait(1.2)
+	if not Combat.enemies.is_empty():
+		errors.append("잠긴 채석장에 적 %d마리" % Combat.enemies.size())
+
+	# 골짜기 복원(수호체 처치는 건너뛴다) → 입구가 열리고 보상을 받는다.
+	var me: Array[int] = [1]
+	World.report_boss_defeated(z1, me)
+	await _test_restore(z1, errors)
+	await _wait(0.3)
+	if area.gate != null:
+		errors.append("골짜기를 복원했는데 채석장 입구가 닫혀 있음")
+	if World.my_count(&"sunroot_seed") != 3:
+		errors.append("골짜기 보상 햇뿌리 씨앗 %d개 (기대 3)" % World.my_count(&"sunroot_seed"))
+	if not current_goal().contains("채석"):
+		errors.append("골짜기 복원 뒤 목표: %s" % current_goal())
+	if World.sim.can_place(&"beacon", site2, 0) == "locked":
+		errors.append("골짜기를 복원했는데 채석장 비콘이 잠겨 있음")
+
+	# 채석장: 포탑과 롤러가 나온다. 포탑은 제자리에서 쏜다.
+	player.teleport(Vector3(128, 0.05, -45), 0.0)
+	var waited := 0.0
+	while waited < 10.0 and (bolts.is_empty() or Combat.my_vitals().hp >= CombatRules.MAX_HP):
+		await _wait(0.25)
+		waited += 0.25
+	var kinds := {}
+	for id: int in Combat.enemies:
+		var e := Combat.enemies[id]
+		kinds[e.def.id] = int(kinds.get(e.def.id, 0)) + 1
+		if e.def.kind == &"turret":
+			var near := false
+			for sp in area.spawn_points:
+				if e.global_position.distance_to(sp) < 0.6:
+					near = true
+			if not near:
+				errors.append("포탑이 제자리를 벗어남: %s" % e.global_position)
+	if not kinds.has(&"sentry") or not kinds.has(&"roller"):
+		errors.append("채석장의 적 구성: %s" % kinds)
+	if int(kinds.get(&"sentry", 0)) > 3:
+		errors.append("포탑이 한 자리에 여럿: %s" % kinds)
+	if bolts.is_empty():
+		errors.append("포탑이 10초 동안 쏘지 않음")
+	if Combat.my_vitals().hp >= CombatRules.MAX_HP:
+		errors.append("채석장의 적이 10초 동안 피해를 주지 못함")
+	if Combat.spawn_cap(1) != 3:
+		errors.append("채석장 출현 한도 %d (기대 3)" % Combat.spawn_cap(1))
+	if Combat.find_path(Vector3(126, 0, -45), Vector3(190, 0, -42)).size() < 2:
+		errors.append("채석장 길찾기 경로가 없음")
+
+	# 채석 거신: 터에 들어서면 나타난다. 고리 폭발, 롤러 소환.
+	Combat.activation_range = 0.0
+	for id: int in Combat.enemies.keys():
+		Combat._damage_enemy(Combat.enemies[id], 99999.0, 1)
+	await _wait(5.5)
+	player.teleport(Vector3(190, 0.05, -42), 0.0)
+	await _wait(1.0)
+	var boss := Combat.boss(1)
+	if boss == null:
+		errors.append("채석 거신이 나타나지 않음")
+	else:
+		if boss.def.id != &"excavator" or not is_equal_approx(boss.max_hp, 2600.0):
+			errors.append("거신 %s, 체력 %.0f (기대 excavator 2600)" % [boss.def.id, boss.max_hp])
+		if Combat.boss(0) != null:
+			errors.append("골짜기의 수호체가 함께 나타남")
+		var before := hazards.size()
+		Combat.boss_ring(boss)
+		if hazards.size() - before != 24:
+			errors.append("고리 폭발 표시 %d개 (기대 24)" % (hazards.size() - before))
+		Combat._damage_enemy(boss, boss.hp - boss.max_hp * 0.6, 1)
+		var rollers := 0
+		for id: int in Combat.enemies:
+			if Combat.enemies[id].def.id == &"roller":
+				rollers += 1
+		if rollers != 2:
+			errors.append("거신의 소환: 롤러 %d마리 (기대 2)" % rollers)
+		var cores := World.my_count(&"energy_core")
+		Combat._damage_enemy(boss, 99999.0, 1)
+		await _wait(0.3)
+		if not World.sim.boss_defeated(z2) or World.my_count(&"energy_core") != cores + 1:
+			errors.append("거신 처치 뒤 코어 %d → %d, 기록 %s" % [cores, World.my_count(&"energy_core"), World.sim.boss_defeated(z2)])
+	for id: int in Combat.enemies.keys():
+		Combat._damage_enemy(Combat.enemies[id], 99999.0, 1)
+	await _wait(3.0)   # 남은 폭발이 지나가길 기다린다
+	if not current_goal().contains("비콘"):
+		errors.append("거신 처치 뒤 목표: %s" % current_goal())
+
+	# 채석장 복원: 보상, 건축 구역, 출현 중단.
+	var relics := World.my_count(&"relic_blueprint")
+	var inside := Vector3i(140, 0, -70)
+	if World.sim.can_place(&"storage", inside, 0) != "not_buildable":
+		errors.append("복원 전인데 채석장에 지을 수 있음")
+	await _test_restore(z2, errors)
+	await _wait(0.3)
+	if World.my_count(&"relic_blueprint") != relics + 2 or World.my_count(&"sunroot_seed") != 5:
+		errors.append("채석장 보상: 유물 설계도 %d → %d, 햇뿌리 씨앗 %d (기대 +2, 5)" % [relics, World.my_count(&"relic_blueprint"), World.my_count(&"sunroot_seed")])
+	if World.sim.can_place(&"storage", inside, 0) != "":
+		errors.append("복원 뒤 채석장 건축이 '%s'" % World.sim.can_place(&"storage", inside, 0))
+	if Combat.spawn_cap(1) != 0 or Combat.spawn_cap(0) != 0:
+		errors.append("복원 뒤 출현 한도 %d, %d" % [Combat.spawn_cap(0), Combat.spawn_cap(1)])
+	if not current_goal().contains("완료"):
+		errors.append("모두 복원한 뒤 목표: %s" % current_goal())
+
+	# 햇뿌리: 심을 수 있고, 연료 두 개가 된다.
+	World.grant(1, {"sunroot": 1})
+	player.teleport(Vector3(2, 0.05, -4), 0.0)
+	await _wait(0.4)
+	var bench: int = World.sim.occupancy.get(Vector3i(3, 0, -6), 0)
+	var fuel := World.my_count(&"biofuel")
+	if open_panel(bench):
+		panel.act("craft", ["make_biofuel_sunroot", 1])
+		_close_panel()
+	if World.my_count(&"biofuel") != fuel + 2:
+		errors.append("햇뿌리 연료 %d → %d (기대 +2)" % [fuel, World.my_count(&"biofuel")])
+
+	if not Save.save_now(true):
+		errors.append("저장 실패")
+	else:
+		var loaded := Save.load_world(Save.world_id)
+		if loaded.is_empty() or not (loaded["sim"] as SimWorld).zone_restored(z2) \
+				or (loaded["sim"] as SimWorld).state_hash() != World.sim.state_hash():
+			errors.append("저장한 복원 상태를 다시 읽지 못함")
+
+	if errors.is_empty():
+		print("ZONETEST OK")
+	else:
+		for e in errors:
+			print("ZONETEST FAIL: %s" % e)
 	get_tree().quit(0 if errors.is_empty() else 1)
 
 

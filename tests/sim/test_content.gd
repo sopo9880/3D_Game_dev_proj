@@ -11,7 +11,7 @@ func test_content_loads_without_errors() -> void:
 func test_recipes_are_attached_to_machines() -> void:
 	var db := ContentDB.load_from_dir("res://data")
 	eq(db.structures[&"smelter"].recipes.size(), 1, "제련기 레시피 수")
-	eq(db.structures[&"assembler"].recipes.size(), 3, "조립기 레시피 수")
+	eq(db.structures[&"assembler"].recipes.size(), 4, "조립기 레시피 수")
 
 
 func test_content_hash_is_stable() -> void:

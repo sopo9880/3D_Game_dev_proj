@@ -2,5 +2,12 @@
   {"id": "blighted_hollow", "name": "메마른 골짜기",
    "capsule_item": "purifier_capsule", "capsule_points": 10,
    "beacon_site": [-1, 0, -261],
-   "unlock_zone": [-56, -326, 112, 132, 0]}
+   "unlock_zone": [-56, -326, 112, 132, 0],
+   "rewards": [["sunroot_seed", 3]]},
+
+  {"id": "rusted_quarry", "name": "녹슨 채석장", "requires": "blighted_hollow",
+   "capsule_item": "purifier_capsule", "capsule_points": 5,
+   "beacon_site": [169, 0, -61],
+   "unlock_zone": [124, -116, 92, 112, 0],
+   "rewards": [["relic_blueprint", 2], ["sunroot_seed", 2]]}
 ]

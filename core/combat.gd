@@ -52,9 +52,22 @@ class Hazard:
 
 class SpawnPoint:
 	var pos: Vector3
-	var type_index: int
+	var type_id: StringName
+	var turret: bool = false
 	var cooldown: float = 0.0
 	var alive: Array[int] = []
+
+
+## 적이 나오는 구역 하나(출현 지점들과 우두머리의 터).
+class ZoneState:
+	var zone: int = -1                 ## 구역 인덱스(복원 진행도에 따라 적이 줄어든다)
+	var requires: int = -1             ## 이 구역이 복원되기 전에는 적이 나오지 않는다(입구가 막혀 있다)
+	var points: Array[SpawnPoint] = []
+	var boss_id: StringName = &""
+	var boss_spawn: Vector3 = Vector3.ZERO
+	var boss_radius: float = 0.0
+	var boss: Enemy = null
+	var boss_alone: float = 0.0
 
 
 var vitals: Dictionary[int, Vitals] = {}
@@ -75,13 +88,9 @@ var kills: int = 0
 var _scene: Node3D
 var _nav_map: RID
 var _spawn: Vector3 = Vector3.ZERO
-var _spawn_points: Array[SpawnPoint] = []
+var _zones: Array[ZoneState] = []
+var _enemy_slot: Dictionary[int, int] = {}   ## 적 ID → 그 적이 속한 구역의 순번(_zones의 인덱스)
 var _hazards: Array[Hazard] = []
-var _zone: int = -1                  ## 적이 나오는 구역(복원 진행도에 따라 줄어든다). -1이면 없음
-var _boss_spawn: Vector3 = Vector3.ZERO
-var _boss_radius: float = 0.0
-var _boss: Enemy = null
-var _boss_alone: float = 0.0
 var _local_body: RID
 var _next_enemy_id: int = 1
 var _next_projectile_id: int = 1
@@ -110,22 +119,33 @@ func _ready() -> void:
 # 씬 연결: 전투가 벌어지는 맵이 자신을 등록한다.
 # ---------------------------------------------------------------------------
 
-## config: {"spawn_points": Array[Vector3], "zone": int, "boss_spawn": Vector3, "boss_radius": float}
+## config: {"zones": [{"zone": int, "spawn_points": Array[Vector3], "spawn_types": Array[StringName],
+##                     "requires": int, "boss": StringName, "boss_spawn": Vector3, "boss_radius": float}, ...]}
 func bind_scene(scene: Node3D, spawn: Vector3, nav_map: RID, config: Dictionary, local_body: RID) -> void:
 	unbind_scene()
 	_scene = scene
 	_spawn = spawn
 	_nav_map = nav_map
 	_local_body = local_body
-	_zone = int(config.get("zone", -1))
-	_boss_spawn = config.get("boss_spawn", Vector3.ZERO)
-	_boss_radius = float(config.get("boss_radius", 0.0))
-	var points: Array = config.get("spawn_points", [])
-	for i in points.size():
-		var sp := SpawnPoint.new()
-		sp.pos = points[i]
-		sp.type_index = i % 2   # 돌진형과 원거리형을 번갈아
-		_spawn_points.append(sp)
+	for row: Dictionary in config.get("zones", []):
+		var zs := ZoneState.new()
+		zs.zone = int(row.get("zone", -1))
+		zs.requires = int(row.get("requires", -1))
+		zs.boss_id = row.get("boss", &"")
+		zs.boss_spawn = row.get("boss_spawn", Vector3.ZERO)
+		zs.boss_radius = float(row.get("boss_radius", 0.0))
+		var types: Array = row.get("spawn_types", [])
+		var points: Array = row.get("spawn_points", [])
+		for i in points.size():
+			if types.is_empty():
+				break
+			var sp := SpawnPoint.new()
+			sp.pos = points[i]
+			sp.type_id = types[i % types.size()]   # 종류를 번갈아
+			var d := enemy_def(sp.type_id)
+			sp.turret = d != null and d.kind == &"turret"
+			zs.points.append(sp)
+		_zones.append(zs)
 	_sync_players()
 	my_grenades = CombatRules.GRENADE_MAX
 	grenades_changed.emit()
@@ -137,10 +157,9 @@ func unbind_scene() -> void:
 			enemies[id].queue_free()
 	enemies.clear()
 	_projectiles.clear()
-	_spawn_points.clear()
+	_zones.clear()
+	_enemy_slot.clear()
 	_hazards.clear()
-	_boss = null
-	_zone = -1
 	_scene = null
 	vitals.clear()
 	_grenades.clear()
@@ -476,20 +495,25 @@ func _damage_enemy(e: Enemy, amount: float, by: int) -> void:
 			e.summons_done += 1
 			for i in int(e.def.summon_count):
 				var a := TAU * i / e.def.summon_count
-				spawn_enemy(&"crawler", e.global_position + Vector3(cos(a), 0, sin(a)) * 4.0 + Vector3(0, 0.2, 0))
+				spawn_enemy(e.def.summon_type, e.global_position + Vector3(cos(a), 0, sin(a)) * 4.0 + Vector3(0, 0.2, 0),
+						int(_enemy_slot.get(e.net_id, -1)))
 	if e.hp > 0.0:
 		return
-	if e == _boss:
-		_boss = null
-		var witnesses: Array[int] = []
-		for peer: int in vitals:
-			if peer == by or (World.positions.has(peer) and World.positions[peer].distance_to(e.global_position) <= LOOT_RANGE):
-				witnesses.append(peer)
-		World.report_boss_defeated(_zone, witnesses)
+	for zs in _zones:
+		if e == zs.boss:
+			zs.boss = null
+			# 구역이 복원되어 사라지는 것은 처치가 아니다.
+			if by > 0:
+				var witnesses: Array[int] = []
+				for peer: int in vitals:
+					if peer == by or (World.positions.has(peer) and World.positions[peer].distance_to(e.global_position) <= LOOT_RANGE):
+						witnesses.append(peer)
+				World.report_boss_defeated(zs.zone, witnesses)
+		for sp in zs.points:
+			sp.alive.erase(e.net_id)
 	var pos := e.global_position
 	enemies.erase(e.net_id)
-	for sp in _spawn_points:
-		sp.alive.erase(e.net_id)
+	_enemy_slot.erase(e.net_id)
 	kills += 1
 	# 전리품은 플레이어마다 따로 굴린다.
 	for peer: int in vitals:
@@ -519,8 +543,15 @@ func _grant(peer: int, items: Dictionary) -> void:
 # 적 생성과 동기화
 # ---------------------------------------------------------------------------
 
-## 호스트: 적을 하나 만든다.
-func spawn_enemy(type_id: StringName, pos: Vector3) -> Enemy:
+func enemy_def(type_id: StringName) -> EnemyDef:
+	for d in enemy_defs:
+		if d.id == type_id:
+			return d
+	return null
+
+
+## 호스트: 적을 하나 만든다. slot은 그 적이 속한 구역의 순번(훈련장처럼 구역 밖이면 -1).
+func spawn_enemy(type_id: StringName, pos: Vector3, slot: int = -1) -> Enemy:
 	if not multiplayer.is_server() or not is_bound():
 		return null
 	for d in enemy_defs:
@@ -533,6 +564,8 @@ func spawn_enemy(type_id: StringName, pos: Vector3) -> Enemy:
 			var e := _make_enemy(_next_enemy_id, d, hp, false)
 			_next_enemy_id += 1
 			e.position = pos
+			if slot >= 0:
+				_enemy_slot[e.net_id] = slot
 			return e
 	return null
 
@@ -546,78 +579,102 @@ func _make_enemy(id: int, def: EnemyDef, hp: float, puppet: bool) -> Enemy:
 
 
 ## 구역 복원이 진행될수록 한 지점에서 나오는 적이 줄고, 끝나면 더는 나오지 않는다.
-func spawn_cap() -> int:
-	var progress := World.sim.zone_progress(_zone) if _zone >= 0 else 0
+## slot은 구역의 순번(맵 데이터의 zones 순서).
+func spawn_cap(slot: int = 0) -> int:
+	if slot < 0 or slot >= _zones.size():
+		return 0
+	var zs := _zones[slot]
+	var progress := World.sim.zone_progress(zs.zone) if zs.zone >= 0 else 0
 	if progress >= 100:
 		return 0
 	var cap := 3 if progress < 50 else (2 if progress < 80 else 1)
 	# 다섯 명 이상이 함께 싸우면 체력만 올리지 않고 수도 늘린다.
-	return cap + (1 if _players_in_zone() >= 5 else 0)
+	return cap + (1 if _players_in_zone(zs) >= 5 else 0)
 
 
-## 지금 구역에서 싸우고 있는 인원(출현 지점 근처에 있는 살아 있는 플레이어).
-func _players_in_zone() -> int:
+## 지금 그 구역에서 싸우고 있는 인원(출현 지점 근처에 있는 살아 있는 플레이어).
+func _players_in_zone(zs: ZoneState) -> int:
 	var n := 0
 	for peer: int in vitals:
 		if vitals[peer].state != PState.ALIVE or not World.positions.has(peer):
 			continue
-		for sp in _spawn_points:
+		for sp in zs.points:
 			if World.positions[peer].distance_to(sp.pos) <= 90.0:
 				n += 1
 				break
 	return n
 
 
-func max_enemies() -> int:
-	return MAX_ENEMIES + 2 * maxi(_players_in_zone() - 4, 0)
+## 한 구역에 동시에 있을 수 있는 일반 적의 수.
+func max_enemies(slot: int = 0) -> int:
+	if slot < 0 or slot >= _zones.size():
+		return MAX_ENEMIES
+	return MAX_ENEMIES + 2 * maxi(_players_in_zone(_zones[slot]) - 4, 0)
 
 
 func _update_spawner(delta: float) -> void:
-	var cap := spawn_cap()
-	if _zone >= 0 and cap == 0:
-		# 복원이 끝났다: 남은 적은 사라진다.
-		for id: int in enemies.keys():
-			_damage_enemy(enemies[id], 99999.0, 0)
-		return
-	_update_boss(delta)
-	for sp in _spawn_points:
-		sp.cooldown = maxf(sp.cooldown - delta, 0.0)
-		if sp.cooldown > 0.0 or sp.alive.size() >= cap or enemies.size() >= max_enemies():
+	for slot in _zones.size():
+		var zs := _zones[slot]
+		if zs.requires >= 0 and not World.sim.zone_restored(zs.requires):
 			continue
-		var near: int = nearest_alive_player(sp.pos, activation_range)[0]
-		if near < 0:
+		var cap := spawn_cap(slot)
+		if zs.zone >= 0 and cap == 0:
+			# 복원이 끝났다: 이 구역에 남은 적은 사라진다.
+			for id: int in enemies.keys():
+				if int(_enemy_slot.get(id, -1)) == slot and enemies.has(id):
+					_damage_enemy(enemies[id], 99999.0, 0)
 			continue
-		# 플레이어 코앞에는 나타나지 않는다.
-		if World.positions[near].distance_to(sp.pos) < 12.0:
-			continue
-		var e := spawn_enemy(enemy_defs[sp.type_index].id, sp.pos)
-		if e != null:
-			sp.alive.append(e.net_id)
-			sp.cooldown = spawn_delay
+		_update_boss(slot, delta)
+		var limit := max_enemies(slot)
+		var count := 0
+		for sp in zs.points:
+			count += sp.alive.size()
+		for sp in zs.points:
+			sp.cooldown = maxf(sp.cooldown - delta, 0.0)
+			# 포탑은 한 자리에 하나만 선다.
+			var point_cap := mini(cap, 1) if sp.turret else cap
+			if sp.cooldown > 0.0 or sp.alive.size() >= point_cap or count >= limit:
+				continue
+			var near: int = nearest_alive_player(sp.pos, activation_range)[0]
+			if near < 0:
+				continue
+			# 플레이어 코앞에는 나타나지 않는다.
+			if World.positions[near].distance_to(sp.pos) < 12.0:
+				continue
+			var e := spawn_enemy(sp.type_id, sp.pos, slot)
+			if e != null:
+				sp.alive.append(e.net_id)
+				sp.cooldown = spawn_delay
+				count += 1
 
 
 ## 우두머리는 플레이어가 그 터에 들어오면 나타나고, 모두 떠나면 물러난다(체력이 처음으로 돌아간다).
-func _update_boss(delta: float) -> void:
-	if _zone < 0 or _boss_radius <= 0.0 or World.sim.boss_defeated(_zone):
+func _update_boss(slot: int, delta: float) -> void:
+	var zs := _zones[slot]
+	if zs.zone < 0 or zs.boss_radius <= 0.0 or zs.boss_id == &"" or World.sim.boss_defeated(zs.zone):
 		return
-	if _boss == null or not is_instance_valid(_boss):
-		_boss = null
-		if nearest_alive_player(_boss_spawn, _boss_radius)[0] >= 0:
-			_boss = spawn_enemy(&"warden", _boss_spawn + Vector3(0, 0.2, 0))
-			_boss_alone = 0.0
+	if zs.boss == null or not is_instance_valid(zs.boss):
+		zs.boss = null
+		if nearest_alive_player(zs.boss_spawn, zs.boss_radius)[0] >= 0:
+			zs.boss = spawn_enemy(zs.boss_id, zs.boss_spawn + Vector3(0, 0.2, 0), slot)
+			zs.boss_alone = 0.0
 		return
-	if nearest_alive_player(_boss.global_position, 80.0)[0] >= 0:
-		_boss_alone = 0.0
+	if nearest_alive_player(zs.boss.global_position, 80.0)[0] >= 0:
+		zs.boss_alone = 0.0
 		return
-	_boss_alone += delta
-	if _boss_alone > 6.0:
-		enemies.erase(_boss.net_id)
-		_boss.queue_free()
-		_boss = null
+	zs.boss_alone += delta
+	if zs.boss_alone > 6.0:
+		enemies.erase(zs.boss.net_id)
+		_enemy_slot.erase(zs.boss.net_id)
+		zs.boss.queue_free()
+		zs.boss = null
 
 
-func boss() -> Enemy:
-	return _boss if _boss != null and is_instance_valid(_boss) else null
+func boss(slot: int = 0) -> Enemy:
+	if slot < 0 or slot >= _zones.size():
+		return null
+	var b := _zones[slot].boss
+	return b if b != null and is_instance_valid(b) else null
 
 
 ## 우두머리의 포격: 플레이어들의 발밑에 표시가 뜨고 잠시 뒤 터진다.
@@ -633,6 +690,19 @@ func boss_barrage(e: Enemy, target_peer: int) -> void:
 		spots.append(center + Vector3(cos(a), 0, sin(a)) * _rng.randf_range(3.5, 6.0))
 	for i in mini(spots.size(), 3):
 		spawn_hazard(spots[i], e.def.barrage_radius, e.def.barrage_delay, e.def.barrage_damage)
+
+
+## 우두머리의 고리 폭발: 몸 둘레와 그 바깥에 고리 두 겹이 차례로 터진다. 두 고리 사이나 더 바깥이 안전하다.
+func boss_ring(e: Enemy) -> void:
+	var n := int(e.def.ring_count)
+	var start := _rng.randf() * TAU
+	for ring in 2:
+		var r := e.def.ring_radius * (1.0 + ring)
+		var count := n * (1 + ring)
+		for i in count:
+			var a := start + TAU * i / count
+			spawn_hazard(e.global_position + Vector3(cos(a), 0, sin(a)) * r, e.def.barrage_radius * 0.8,
+					e.def.barrage_delay + 0.6 * ring, e.def.barrage_damage)
 
 
 func spawn_hazard(pos: Vector3, radius: float, delay: float, damage: float) -> void:
@@ -736,8 +806,9 @@ func has_line_of_sight(from: Vector3, to: Vector3) -> bool:
 # 투사체: 원거리형의 침, 플레이어의 수류탄
 # ---------------------------------------------------------------------------
 
-func spawn_spit(pos: Vector3, vel: Vector3, damage: float) -> void:
-	_add_projectile(&"spit", pos, vel, damage, 0)
+## 적의 탄: 침(spit)과 포탑의 탄(bolt). 날아가는 규칙은 같고 보이는 모습만 다르다.
+func spawn_spit(pos: Vector3, vel: Vector3, damage: float, kind: StringName = &"spit") -> void:
+	_add_projectile(kind, pos, vel, damage, 0)
 
 
 ## 수류탄을 던진다(투척류 칸).
@@ -840,7 +911,8 @@ func _update_projectiles(delta: float) -> void:
 		if p.kind == &"grenade":
 			p.vel.y -= GRENADE_GRAVITY * delta
 		var next := p.pos + p.vel * delta
-		if p.kind == &"spit":
+		var shot := p.kind != &"grenade"
+		if shot:
 			# 플레이어에게 맞았나 (가슴 높이 기준).
 			var hit_peer := -1
 			for peer: int in vitals:
@@ -854,11 +926,11 @@ func _update_projectiles(delta: float) -> void:
 				damage_player(hit_peer, p.damage)
 				_end_projectile(p, next, false)
 				continue
-		var q := PhysicsRayQueryParameters3D.create(p.pos, next, 1 if p.kind == &"spit" else 3)
+		var q := PhysicsRayQueryParameters3D.create(p.pos, next, 1 if shot else 3)
 		if _local_body.is_valid():
 			q.exclude = [_local_body]
 		var hit := space.intersect_ray(q)
-		if p.kind == &"spit":
+		if shot:
 			if not hit.is_empty() or p.age > SPIT_LIFETIME:
 				_end_projectile(p, hit.get("position", next), false)
 				continue

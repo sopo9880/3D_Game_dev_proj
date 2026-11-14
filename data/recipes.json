@@ -2,6 +2,7 @@
   {"id": "mine_iron_ore",   "inputs": [],                                   "output": ["iron_ore", 1],         "ticks": 10, "machines": ["miner"]},
   {"id": "smelt_iron",      "inputs": [["iron_ore", 1]],                    "output": ["iron_ingot", 1],       "ticks": 20, "machines": ["smelter"]},
   {"id": "make_biofuel",    "inputs": [["glowleaf", 2]],                    "output": ["biofuel", 1],          "ticks": 30, "machines": ["workbench", "assembler"]},
+  {"id": "make_biofuel_sunroot", "inputs": [["sunroot", 1]],               "output": ["biofuel", 2],          "ticks": 30, "machines": ["workbench", "assembler"]},
   {"id": "make_part",       "inputs": [["iron_ingot", 2], ["scrap", 1]],    "output": ["precision_part", 1],   "ticks": 40, "machines": ["workbench", "assembler"]},
   {"id": "make_capsule",    "inputs": [["taint_crystal", 1], ["glowleaf", 2]], "output": ["purifier_capsule", 1], "ticks": 40, "machines": ["workbench", "assembler"]},
   {"id": "make_ext_mag",    "inputs": [["precision_part", 3]],              "output": ["ext_mag", 1],          "ticks": 40, "machines": ["workbench"]},
